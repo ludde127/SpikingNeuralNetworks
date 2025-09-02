@@ -69,7 +69,6 @@ struct Synapse {
     pre_neuron_index: usize,
     post_neuron_index: usize,
     weight: f32,                 // synaptic efficacy (current units)
-    delay_steps: usize,          // integer delay in time steps
     spike_buffer: VecDeque<f32>, // circular buffer for axonal delay
 }
 
@@ -88,7 +87,6 @@ impl Synapse {
             pre_neuron_index,
             post_neuron_index,
             weight,
-            delay_steps,
             spike_buffer,
         }
     }
