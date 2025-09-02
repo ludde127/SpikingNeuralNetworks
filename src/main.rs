@@ -1,6 +1,8 @@
 use rand::prelude::*;
 use std::collections::VecDeque;
 
+const SYNAPTIC_CURRENT_DECAY: f32 = 0.995; // decay factor per time step for synaptic current
+
 #[derive(Clone, Debug)]
 struct Neuron {
     membrane_potential: f32,
@@ -11,6 +13,7 @@ struct Neuron {
     refractory_period_steps: u32,
     refractory_countdown: u32,
     synaptic_current: f32,
+    decay_factor_per_dt: f32, // decay factor for synaptic current per time step
 }
 
 impl Neuron {
@@ -20,6 +23,7 @@ impl Neuron {
         reset_voltage: f32,
         membrane_time_constant: f32,
         refractory_period_steps: u32,
+        decay_factor_per_dt: f32,
     ) -> Self {
         Self {
             membrane_potential: resting_potential,
@@ -30,6 +34,7 @@ impl Neuron {
             refractory_period_steps,
             refractory_countdown: 0,
             synaptic_current: 0.0,
+            decay_factor_per_dt,
         }
     }
 
@@ -54,8 +59,7 @@ impl Neuron {
             self.refractory_countdown = self.refractory_period_steps;
         }
 
-        // Clear synaptic current accumulator after integration
-        self.synaptic_current = 0.0;
+        self.synaptic_current *= self.decay_factor_per_dt * dt; // decay synaptic current
         has_spiked
     }
 }
@@ -121,7 +125,7 @@ impl Network {
         for _ in 0..(num_input_neurons + num_output_neurons) {
             neurons.push(
                 Neuron::new_leaky_integrate_and_fire(
-                    0.0, 1.0, 0.0, 20.0, 3
+                    0.0, 1.0, 0.0, 20.0, 3, SYNAPTIC_CURRENT_DECAY
                 )
             );
         }
@@ -130,6 +134,8 @@ impl Network {
         // Random feedforward synapses from inputs -> outputs
         let mut rng = StdRng::seed_from_u64(42);
         let mut synapses = Vec::new();
+
+        // Fully connect inputs to outputs with random weights and delays
         for input_neuron_index in 0..num_input_neurons {
             for output_neuron_index in 0..num_output_neurons {
                 let weight = rng.gen_range(0.05..0.25);
