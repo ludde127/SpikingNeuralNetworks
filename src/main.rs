@@ -1,8 +1,6 @@
 use rand::prelude::*;
 use std::collections::VecDeque;
 
-const SYNAPTIC_CURRENT_DECAY: f32 = 0.995; // decay factor per time step for synaptic current
-
 #[derive(Clone, Debug)]
 struct Neuron {
     membrane_potential: f32,
@@ -13,7 +11,6 @@ struct Neuron {
     refractory_period_steps: u32,
     refractory_countdown: u32,
     synaptic_current: f32,
-    decay_factor_per_dt: f32, // decay factor for synaptic current per time step
 }
 
 impl Neuron {
@@ -23,7 +20,6 @@ impl Neuron {
         reset_voltage: f32,
         membrane_time_constant: f32,
         refractory_period_steps: u32,
-        decay_factor_per_dt: f32,
     ) -> Self {
         Self {
             membrane_potential: resting_potential,
@@ -34,7 +30,6 @@ impl Neuron {
             refractory_period_steps,
             refractory_countdown: 0,
             synaptic_current: 0.0,
-            decay_factor_per_dt,
         }
     }
 
@@ -58,8 +53,6 @@ impl Neuron {
             self.membrane_potential = self.reset_voltage;
             self.refractory_countdown = self.refractory_period_steps;
         }
-
-        self.synaptic_current *= self.decay_factor_per_dt * dt; // decay synaptic current
         has_spiked
     }
 }
@@ -125,7 +118,7 @@ impl Network {
         for _ in 0..(num_input_neurons + num_output_neurons) {
             neurons.push(
                 Neuron::new_leaky_integrate_and_fire(
-                    0.0, 1.0, 0.0, 20.0, 3, SYNAPTIC_CURRENT_DECAY
+                    0.0, 1.0, 0.0, 20.0, 3
                 )
             );
         }
@@ -224,7 +217,7 @@ fn main() {
     // Poisson drive for inputs only; outputs get 0 external current.
     let mut input_drive = PoissonInputs::new(
         vec![15.0; n_in],
-        /*amplitude*/ 20.0,
+        /*amplitude*/ 0.5,
         dt_ms,
         123,
     );
