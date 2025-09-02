@@ -138,8 +138,8 @@ impl Network {
         // Fully connect inputs to outputs with random weights and delays
         for input_neuron_index in 0..num_input_neurons {
             for output_neuron_index in 0..num_output_neurons {
-                let weight = rng.gen_range(0.05..0.25);
-                let delay_steps = rng.gen_range(1..5); // 1..4 ms delay
+                let weight = rng.random_range(0.05..0.25);
+                let delay_steps = rng.random_range(1..5); // 1..4 ms delay
                 let post_neuron_index = num_input_neurons + output_neuron_index;
                 synapses.push(Synapse::new(
                     input_neuron_index,
