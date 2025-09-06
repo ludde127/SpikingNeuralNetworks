@@ -1,5 +1,6 @@
+use rand::Rng;
+use rand_distr::{Normal, Distribution};
 /*
-
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
 either electrical or chemical.
@@ -58,6 +59,7 @@ use std::sync::Arc;
 
 const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
 const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.999;
+const ELECTRICAL_SYNAPSE_WEIGHT: f64 = (MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT) / 2.0;
 const LONG_TERM_POTENTIATION_TIME_WINDOW: f64 = 20.0;
 const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
@@ -98,6 +100,29 @@ struct Neuron {
 }
 
 impl Neuron {
+    /// Constructor to create a new neuron with properties randomized around the mean.
+    fn new(current_time: f64) -> Self {
+        let mut rng = rand::rng();
+
+        // Use a normal distribution for slight variations. Standard deviation is 5% of the mean.
+        let potential_dist = Normal::new(0.0, 0.05).unwrap();
+        let time_dist = Normal::new(0.0, 0.05).unwrap();
+
+        Neuron {
+            resting_potential: MEAN_NEURON_RESTING_POTENTIAL * (1.0 + potential_dist.sample(&mut rng)),
+            membrane_potential: MEAN_NEURON_RESTING_POTENTIAL, // Start at rest
+            threshold: MEAN_NEURON_THRESHOLD * (1.0 + potential_dist.sample(&mut rng)),
+            membrane_time_constant: MEAN_NEURON_MEMBRANE_TIME_CONSTANT * (1.0 + time_dist.sample(&mut rng)),
+            last_spike_time: -f64::INFINITY, // Initialize to never have spiked
+            absolute_refractory_time: MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME * (1.0 + time_dist.sample(&mut rng)),
+            exiting_synapses: Vec::new(),
+            relative_refractory_duration: 5.0, // Example value
+            hyperpolarization_depth: MEAN_HYPERPOLARIZATION_DEPTH * (1.0 + potential_dist.sample(&mut rng)),
+            hyperpolarization_time_constant: MEAN_HYPERPOLARIZATION_TIME_CONSTANT * (1.0 + time_dist.sample(&mut rng)),
+            last_accessed_time: current_time,
+        }
+    }
+
     fn current_threshold(&self, time: f64) -> f64 {
         // If the neuron has had time to refractor but not enough to stop being hyperpolarized
         let time_since_spike = time - self.last_spike_time;
@@ -175,6 +200,8 @@ trait Synapse {
     /// `post_spike_time` is the time the target neuron fired.
     /// `learning_rate` determines the magnitude of the weight change.
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64);
+
+    fn new(source_neuron: usize, target_neuron: usize) -> Self;
 }
 
 #[derive(Clone, Debug)]
@@ -212,11 +239,31 @@ impl Synapse for ChemicalSynapse {
         // Clamp the weight to a valid range to prevent it from growing indefinitely
         self.weight = self.weight.clamp(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT);
     }
+
+    /// Constructor for a new chemical synapse with a random initial weight.
+    fn new(source_neuron: usize, target_neuron: usize) -> Self {
+        let initial_weight = rand::rng().random_range(0.4..=0.6);
+        let plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR * (WEIGHT_RANGE_END_VALUE - (WEIGHT_NORMALIZATION_FACTOR * initial_weight - WEIGHT_RANGE_END_VALUE).abs());
+
+        ChemicalSynapse {
+            source_neuron,
+            target_neuron,
+            weight: initial_weight,
+            plasticity,
+        }
+    }
 }
 
 impl Synapse for ElectricalSynapse {
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
         // Do nothing, electrical synapses are not plastic
+    }
+    fn new(source_neuron: usize, target_neuron: usize) -> Self {
+        ElectricalSynapse {
+            source_neuron,
+            target_neuron,
+            weight: ELECTRICAL_SYNAPSE_WEIGHT
+        }
     }
 }
 
