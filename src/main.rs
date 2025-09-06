@@ -1,267 +1,128 @@
 use rand::prelude::*;
 use std::collections::VecDeque;
 
+// Axons connect neurons
+//
+//
+
+/*
+
+## Synapse
+A synapse is a structure that allows a neuron to signal another neuron, these can be
+either electrical or chemical.
+
+A synapse most often connects many-to-one neurons or one-to-many, but it can also be one to one.
+
+Plasticity in synapses is only possible for chemical synapses. Where it works in two ways:
+Long-term potentiation (LTP) and Long-term depression (LTD).
+
+LTP: The connection is strengthened (the sensitivity increased) when a presynaptic neuron commonly stimulates a postsynaptic neuron.
+
+LTD: This is the opposite of LTP and the connection is weakened, this happens when a synapse is repeatedly activated at a low frequency.
+
+### Electrical  (trough gap junctions).
+
+The communication is almost instant.
+
+Most often bidirectional, sometimes rectified, primarily transmitting in one direction.
+
+Low capacity for signal modulation, cannot be modified or amplified.
+
+Used for synchronizing the firing of groups of neurons.
+
+
+### Chemical synapses
+
+Chemical synapses are much slower but more flexible.
+
+Speed: 1-100 ms
+
+Is unidirectional
+
+Chemical synapses has good ways of modulating the signal, to amplify signals whose sensitivity can
+be altered. This makes plasticity possible.
+
+Chemical synapses allow summing up (integrating) all the inputs from other neurons for the postsynapic
+neuron. Chemical synapses can both send excitatory and inhibitory signals (both negative and positive towards the sum).
+*/
+
+const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
+const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.999;
+const LONG_TERM_POTENTIATION_TIME_WINDOW: f64 = 20.0;
+const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
+const SYNAPSE_LTP_DECAY: f64 = 10.0;
+const SYNAPSE_LTD_DECAY: f64 = 10.0;
+
+fn modified_sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-(x-0.5).exp()))
+}
+
 #[derive(Clone, Debug)]
 struct Neuron {
-    membrane_potential: f32,
-    resting_potential: f32,
-    threshold_voltage: f32,
-    reset_voltage: f32,
-    membrane_time_constant: f32, // in milliseconds
-    refractory_period_steps: u32,
-    refractory_countdown: u32,
-    synaptic_current: f32,
+
 }
 
-impl Neuron {
-    fn new_leaky_integrate_and_fire(
-        resting_potential: f32,
-        threshold_voltage: f32,
-        reset_voltage: f32,
-        membrane_time_constant: f32,
-        refractory_period_steps: u32,
-    ) -> Self {
-        Self {
-            membrane_potential: resting_potential,
-            resting_potential,
-            threshold_voltage,
-            reset_voltage,
-            membrane_time_constant,
-            refractory_period_steps,
-            refractory_countdown: 0,
-            synaptic_current: 0.0,
-        }
-    }
+impl Neuron {}
 
-    /// Advance neuron by one time step of size `dt` (in ms) with an external current `i_ext`.
-    /// Returns true if the neuron spikes in this step.
-    fn step(&mut self, dt: f32, external_current: f32) -> bool {
-        if self.refractory_countdown > 0 {
-            self.refractory_countdown -= 1;
-            self.membrane_potential = self.reset_voltage;
-            return false;
-        }
+#[derive(Clone, Debug)]
+struct ElectricalSynapse {
+    // This synapse is unidirectional from source_neuron to target_neuron
 
-        // Simple LIF Euler integration: dv/dt = (-(v - v_rest) + I) / tau_m
-        let total_current = self.synaptic_current + external_current;
-        let dv = (-(self.membrane_potential - self.resting_potential) + total_current)
-            * (dt / self.membrane_time_constant);
-        self.membrane_potential += dv;
+    source_neuron: usize,
+    target_neuron: usize,
 
-        let has_spiked = self.membrane_potential >= self.threshold_voltage;
-        if has_spiked {
-            self.membrane_potential = self.reset_voltage;
-            self.refractory_countdown = self.refractory_period_steps;
-        }
-        has_spiked
-    }
+    weight: f64, // This weight is constant for the synapse.
+}
+
+trait Synapse {
+    /// Applies the STDP learning rule to update the synapse weight.
+    /// `pre_spike_time` is the time the source neuron fired.
+    /// `post_spike_time` is the time the target neuron fired.
+    /// `learning_rate` determines the magnitude of the weight change.
+    fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64);
 }
 
 #[derive(Clone, Debug)]
-struct Synapse {
-    pre_neuron_index: usize,
-    post_neuron_index: usize,
-    weight: f32,                 // synaptic efficacy (current units)
-    delay_steps: usize,          // integer delay in time steps
-    spike_buffer: VecDeque<f32>, // circular buffer for axonal delay
+struct ChemicalSynapse {
+    // This synapse is bidirectional and plastic. And learns its weight using Spike-Timing-Dependent Plasticity (STDP)
+    source_neuron: usize,
+    target_neuron: usize,
+
+    weight: f64,  // This weight is learned
+    plasticity: f64, // This is a factor which is similar to learning rate. It is updated based on how far the weight is from the max (or min)
 }
 
-impl Synapse {
-    fn new(
-        pre_neuron_index: usize,
-        post_neuron_index: usize,
-        weight: f32,
-        delay_steps: usize,
-    ) -> Self {
-        let mut spike_buffer = VecDeque::with_capacity(delay_steps.max(1));
-        for _ in 0..delay_steps {
-            spike_buffer.push_back(0.0);
-        }
-        Self {
-            pre_neuron_index,
-            post_neuron_index,
-            weight,
-            delay_steps,
-            spike_buffer,
-        }
-    }
+impl Synapse for ChemicalSynapse {
+    /// Applies the STDP learning rule to update the synapse weight.
+    /// `pre_spike_time` is the time the source neuron fired.
+    /// `post_spike_time` is the time the target neuron fired.
+    /// `learning_rate` determines the magnitude of the weight change.
+    fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
+        let delta_t = post_spike_time - pre_spike_time;
 
-    /// Propagate one tick: push spike effect if `pre` spiked, pop front to deliver to `post`.
-    fn tick(&mut self, pre_spiked: bool) -> f32 {
-        let current_to_propagate = if pre_spiked { self.weight } else { 0.0 };
-        self.spike_buffer.push_back(current_to_propagate);
-        self.spike_buffer.pop_front().unwrap_or(0.0)
-    }
-}
-
-struct Network {
-    neurons: Vec<Neuron>,
-    synapses: Vec<Synapse>,
-}
-
-impl Network {
-    fn new(neurons: Vec<Neuron>, synapses: Vec<Synapse>) -> Self {
-        Self { neurons, synapses }
-    }
-
-    fn number_of_neurons(&self) -> usize {
-        self.neurons.len()
-    }
-
-    fn number_of_synapses(&self) -> usize {
-        self.synapses.len()
-    }
-
-    fn new_evolving_network(num_input_neurons: usize, num_output_neurons: usize) -> Self {
-        // Build neurons: inputs + outputs (all LIF for simplicity)
-        let mut neurons = Vec::new();
-        for _ in 0..(num_input_neurons + num_output_neurons) {
-            neurons.push(
-                Neuron::new_leaky_integrate_and_fire(
-                    0.0, 1.0, 0.0, 20.0, 3
-                )
-            );
+        // Long-Term Potentiation (LTP): Pre-synaptic spike before post-synaptic spike
+        if delta_t > 0.0 && delta_t <= LONG_TERM_POTENTIATION_TIME_WINDOW {
+            let delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
+            self.weight += delta_w;
         }
 
-
-        // Random feedforward synapses from inputs -> outputs
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut synapses = Vec::new();
-
-        // Fully connect inputs to outputs with random weights and delays
-        for input_neuron_index in 0..num_input_neurons {
-            for output_neuron_index in 0..num_output_neurons {
-                let weight = rng.random_range(0.05..0.25);
-                let delay_steps = rng.random_range(1..5); // 1..4 ms delay
-                let post_neuron_index = num_input_neurons + output_neuron_index;
-                synapses.push(Synapse::new(
-                    input_neuron_index,
-                    post_neuron_index,
-                    weight,
-                    delay_steps,
-                ));
-            }
+        // Long-Term Depression (LTD): Post-synaptic spike before pre-synaptic spike
+        else if delta_t < 0.0 && delta_t >= -LONG_TERM_DEPRESSION_TIME_WINDOW { // 20ms window for LTD
+            let delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
+            self.weight -= delta_w;
         }
 
-        Self { neurons, synapses }
-
-    }
-
-    /// Step the entire network once. `external_currents` is per-neuron external current.
-    /// Returns a Vec<bool> marking spikes per neuron for this step.
-    fn step(&mut self, dt: f32, external_currents: &[f32]) -> Vec<bool> {
-        assert_eq!(self.neurons.len(), external_currents.len());
-
-        // 1) Integrate neurons with their current accumulators
-        let mut spiked = self
-            .neurons
-            .iter_mut()
-            .zip(external_currents.iter().copied())
-            .map(|(neuron, current)| neuron.step(dt, current))
-            .collect::<Vec<bool>>();
-
-        // 2) Propagate synapses based on spikes that occurred *this* step
-        for synapse in &mut self.synapses {
-            let delivered_current = synapse.tick(spiked[synapse.pre_neuron_index]);
-            self.neurons[synapse.post_neuron_index].synaptic_current += delivered_current;
-        }
-
-        spiked
+        // Clamp the weight to a valid range to prevent it from growing indefinitely
+        self.weight = modified_sigmoid(self.weight);
     }
 }
 
-/// Simple Poisson spike generator driving a set of input channels as external current pulses.
-struct PoissonInputs {
-    firing_rates_hz: Vec<f32>,
-    amplitude: f32,
-    dt_ms: f32,
-    rng: StdRng,
-}
-
-impl PoissonInputs {
-    fn new(firing_rates_hz: Vec<f32>, amplitude: f32, dt_ms: f32, seed: u64) -> Self {
-        Self {
-            firing_rates_hz,
-            amplitude,
-            dt_ms,
-            rng: StdRng::seed_from_u64(seed),
-        }
-    }
-
-    fn sample_currents(&mut self) -> Vec<f32> {
-        let dt_s = self.dt_ms / 1000.0;
-        self.firing_rates_hz
-            .iter()
-            .map(|&rate_hz| {
-                let probability = rate_hz * dt_s; // Bernoulli approx to Poisson per bin
-                if self.rng.gen::<f32>() < probability {
-                    self.amplitude
-                } else {
-                    0.0
-                }
-            })
-            .collect()
+impl Synapse for ElectricalSynapse {
+    fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
+        // Do nothing, electrical synapses are not plastic
     }
 }
 
 fn main() {
-    // --- Config ---
-    let dt_ms = 1.0; // 1 ms timestep
-    let num_timesteps = 1000; // simulate 1 second
-
-    let n_in = 3;
-    let n_out = 3;
-
-    let mut network = Network::new_evolving_network(n_in, n_out);
-
-    // Poisson drive for inputs only; outputs get 0 external current.
-    let mut input_drive = PoissonInputs::new(
-        vec![15.0; n_in],
-        /*amplitude*/ 0.5,
-        dt_ms,
-        123,
-    );
-
-    // Buffers for logging spikes
-    let total_neurons = network.number_of_neurons();
-    let mut spike_history: Vec<Vec<bool>> = Vec::with_capacity(num_timesteps);
-
-    for _t in 0..num_timesteps {
-        let mut external_currents = vec![0.0; total_neurons];
-        let input_pulses = input_drive.sample_currents();
-        for (k, &value) in input_pulses.iter().enumerate() {
-            external_currents[k] = value;
-        }
-
-        let spiked_this_step = network.step(dt_ms, &external_currents);
-        spike_history.push(spiked_this_step);
-    }
-
-    // Print a simple ASCII raster plot: rows=neurons, cols=time (downsampled)
-    let downsample_factor = 2usize;
-    println!(
-        "\nASCII Raster ('.'=no spike, '*'=spike). Inputs: 0..{} Outputs: {}..{}\n",
-        n_in - 1,
-        n_in,
-        total_neurons - 1
-    );
-    for neuron_index in 0..total_neurons {
-        print!("n{:02} ", neuron_index);
-        for t in (0..num_timesteps).step_by(downsample_factor) {
-            let character = if spike_history[t][neuron_index] {
-                '*'
-            } else {
-                '.'
-            };
-            print!("{}", character);
-        }
-        println!();
-    }
-
-    // Also print total spikes per neuron
-    println!("\nSpike counts per neuron:");
-    for neuron_index in 0..total_neurons {
-        let count: usize = spike_history.iter().map(|s| s[neuron_index] as usize).sum();
-        println!("n{:02}: {}", neuron_index, count);
-    }
+    println!("Basic Neuromorphic network.");
 }
