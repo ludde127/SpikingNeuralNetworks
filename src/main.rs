@@ -53,21 +53,22 @@ const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
 const SYNAPSE_LTD_DECAY: f64 = 10.0;
 
-fn modified_sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-(x-0.5).exp()))
+const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.5;
+const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
+const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
+
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
 }
 
 #[derive(Clone, Debug)]
-struct Neuron {
-
-}
+struct Neuron {}
 
 impl Neuron {}
 
 #[derive(Clone, Debug)]
 struct ElectricalSynapse {
-    // This synapse is unidirectional from source_neuron to target_neuron
-
+    // This synapse is bidirectional from source_neuron to target_neuron
     source_neuron: usize,
     target_neuron: usize,
 
@@ -84,11 +85,11 @@ trait Synapse {
 
 #[derive(Clone, Debug)]
 struct ChemicalSynapse {
-    // This synapse is bidirectional and plastic. And learns its weight using Spike-Timing-Dependent Plasticity (STDP)
+    // This synapse is unidirectional and plastic. And learns its weight using Spike-Timing-Dependent Plasticity (STDP)
     source_neuron: usize,
     target_neuron: usize,
 
-    weight: f64,  // This weight is learned
+    weight: f64,     // This weight is learned
     plasticity: f64, // This is a factor which is similar to learning rate. It is updated based on how far the weight is from the max (or min)
 }
 
@@ -105,15 +106,17 @@ impl Synapse for ChemicalSynapse {
             let delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
             self.weight += delta_w;
         }
-
         // Long-Term Depression (LTD): Post-synaptic spike before pre-synaptic spike
-        else if delta_t < 0.0 && delta_t >= -LONG_TERM_DEPRESSION_TIME_WINDOW { // 20ms window for LTD
+        else if delta_t < 0.0 && delta_t >= -LONG_TERM_DEPRESSION_TIME_WINDOW {
+            // 20ms window for LTD
             let delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
             self.weight -= delta_w;
         }
-
+        self.plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
+            * (WEIGHT_RANGE_END_VALUE
+                - (WEIGHT_NORMALIZATION_FACTOR * self.weight - WEIGHT_RANGE_END_VALUE).abs());
         // Clamp the weight to a valid range to prevent it from growing indefinitely
-        self.weight = modified_sigmoid(self.weight);
+        self.weight = sigmoid(self.weight - 0.5);
     }
 }
 
