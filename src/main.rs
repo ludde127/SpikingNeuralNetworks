@@ -202,6 +202,9 @@ trait Synapse {
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64);
 
     fn new(source_neuron: usize, target_neuron: usize) -> Self;
+
+    fn get_source(&self) -> usize;
+    fn get_target(&self) -> usize;
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +255,8 @@ impl Synapse for ChemicalSynapse {
             plasticity,
         }
     }
+    fn get_source(&self) -> usize { self.source_neuron }
+    fn get_target(&self) -> usize { self.target_neuron }
 }
 
 impl Synapse for ElectricalSynapse {
@@ -265,6 +270,8 @@ impl Synapse for ElectricalSynapse {
             weight: ELECTRICAL_SYNAPSE_WEIGHT
         }
     }
+    fn get_source(&self) -> usize { self.source_neuron }
+    fn get_target(&self) -> usize { self.target_neuron }
 }
 
 fn main() {
