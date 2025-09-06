@@ -178,6 +178,7 @@ impl Neuron {
             // Reset the membrane potential to its resting state after firing.
             self.membrane_potential = self.resting_potential;
 
+
             // Return a standard action potential value.
             return 1.0;
         }
@@ -289,6 +290,7 @@ fn main() {
     const NUM_INPUT_NEURONS: usize = 4;
     const NUM_OUTPUT_NEURONS: usize = 2;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS;
+    const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
     let mut network = Network {
         neurons: Vec::with_capacity(TOTAL_NEURONS),
@@ -310,10 +312,18 @@ fn main() {
         }
     }
 
-    println!("Network created with {} input neurons, {} output neurons, and {} synapses.", NUM_INPUT_NEURONS, NUM_OUTPUT_NEURONS, network.synapses.len());
+    println!(
+        "Network created with {} input neurons, {} output neurons, and {} synapses.",
+        NUM_INPUT_NEURONS,
+        NUM_OUTPUT_NEURONS,
+        network.synapses.len()
+    );
     println!("\n--- Initial Synapse Weights ---");
     for synapse in &network.synapses {
-        println!("Synapse ({:_>2} -> {:_>2}): {:.4}", synapse.source_neuron, synapse.target_neuron, synapse.weight);
+        println!(
+            "Synapse ({:_>2} -> {:_>2}): {:.4}",
+            synapse.source_neuron, synapse.target_neuron, synapse.weight
+        );
     }
 
     // --- 2. Simulation ---
@@ -321,57 +331,119 @@ fn main() {
     let simulation_duration = 2000.0; // ms
     let input_spike_potential = 18e-3; // 18mV potential change
     let pattern_presentation_interval = 10.0; // ms
+    let target_pattern = vec![0, 2]; // neurons that fire together
+    println!(
+        "\nTraining network to recognize pattern: Input spikes on neurons {:?}",
+        target_pattern
+    );
 
-    // Define the pattern to learn: fire input neurons 0 and 2 simultaneously.
-    let target_pattern = vec![0, 2];
-    println!("\nTraining network to recognize pattern: Input spikes on neurons {:?}", target_pattern);
+    #[derive(Clone, Debug)]
+    struct SpikeEvent {
+        source_neuron: usize,
+        target_neuron: usize,
+        arrival_time: f64,
+        weight: f64,
+    }
 
+    let mut event_queue: Vec<SpikeEvent> = Vec::new();
 
     let mut current_time = 0.0;
     let mut last_pattern_time = -f64::INFINITY;
+    let total_time: f64 = 100.0; // ms
 
     while current_time < simulation_duration {
-        // Present the input pattern at regular intervals
+        // 1. Present the input pattern
         if current_time - last_pattern_time >= pattern_presentation_interval {
             last_pattern_time = current_time;
-
-            // Fire the neurons in the target pattern
             for &input_neuron_idx in &target_pattern {
-
-                // Clone the list of synapse indices to avoid borrowing `network.neurons` in the loop.
-                let exiting_synapses = network.neurons[input_neuron_idx].exiting_synapses.clone();
-                // Propagate the spike through all outgoing synapses of this input neuron
+                let exiting_synapses =
+                    network.neurons[input_neuron_idx].exiting_synapses.clone();
                 for &synapse_idx in &exiting_synapses {
                     let synapse = &network.synapses[synapse_idx];
-                    let target_neuron_idx = synapse.target_neuron;
-
-                    let potential = input_spike_potential * synapse.weight;
-                    let output_neuron = &mut network.neurons[target_neuron_idx];
-
-                    // Check if the output neuron fires in response
-                    if output_neuron.receive(potential, current_time) > 0.0 {
-                        let pre_spike_time = network.neurons[synapse.get_source()].last_spike_time;
-                        let post_spike_time = network.neurons[synapse.get_target()].last_spike_time;
-
-                        // Update weights for all synapses connected to the neuron that just fired
-                        for s in network.synapses.iter_mut().filter(|s| s.target_neuron == target_neuron_idx) {
-                            s.update_weight(pre_spike_time, post_spike_time);
-                        }
-                    }
+                    event_queue.push(SpikeEvent {
+                        source_neuron: input_neuron_idx,
+                        target_neuron: synapse.target_neuron,
+                        arrival_time: current_time + SYNAPSE_DELAY,
+                        weight: synapse.weight,
+                    });
                 }
+                network.neurons[input_neuron_idx].last_spike_time = current_time;
             }
         }
+
+        let time_step: f64 = 1.0;    // ms
+        while current_time < total_time {
+            // Deliver all spike events scheduled for this timestep
+            let mut i = 0;
+            while i < event_queue.len() {
+                if event_queue[i].arrival_time <= current_time {
+                    let event = event_queue.remove(i);
+
+                    // --- 1. Gather pre-spike times before mutable borrow ---
+                    let incoming_syn_indices: Vec<_> = network
+                        .synapses
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, s)| s.target_neuron == event.target_neuron)
+                        .map(|(idx, _)| idx)
+                        .collect();
+
+                    let pre_spike_times: Vec<f64> = incoming_syn_indices
+                        .iter()
+                        .map(|&idx| {
+                            let src = network.synapses[idx].get_source();
+                            network.neurons[src].last_spike_time
+                        })
+                        .collect();
+
+                    // --- 2. Mutably borrow target neuron and process spike ---
+                    let target_idx = event.target_neuron;
+                    let target = &mut network.neurons[target_idx];
+                    let potential = input_spike_potential * event.weight;
+
+                    if target.receive(potential, current_time) > 0.0 {
+                        let post_spike_time = target.last_spike_time;
+
+                        // --- 3. Update incoming synapse weights (STDP) ---
+                        for (syn_idx, pre_time) in incoming_syn_indices.into_iter().zip(pre_spike_times) {
+                            network.synapses[syn_idx].update_weight(pre_time, post_spike_time);
+                        }
+
+                        // --- 4. Propagate spikes through outgoing synapses ---
+                        let exiting = target.exiting_synapses.clone();
+                        for out_syn_idx in exiting {
+                            let out_syn = &network.synapses[out_syn_idx];
+                            event_queue.push(SpikeEvent {
+                                source_neuron: target_idx,
+                                target_neuron: out_syn.target_neuron,
+                                arrival_time: current_time + SYNAPSE_DELAY,
+                                weight: out_syn.weight,
+                            });
+                        }
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+
+            current_time += time_step;
+        }
+
         current_time += time_step;
     }
 
     // --- 3. Results ---
-    println!("\n--- Final Synapse Weights after {}ms simulation ---", simulation_duration);
+    println!(
+        "\n--- Final Synapse Weights after {}ms simulation ---",
+        simulation_duration
+    );
     for synapse in &network.synapses {
-        println!("Synapse ({:_>2} -> {:_>2}): {:.4}", synapse.source_neuron, synapse.target_neuron, synapse.weight);
+        println!(
+            "Synapse ({:_>2} -> {:_>2}): {:.4}",
+            synapse.source_neuron, synapse.target_neuron, synapse.weight
+        );
     }
 
     println!("\n--- Analysis ---");
-    println!("Observe how weights for synapses from neurons 0 and 2 have increased,");
-    println!("while weights from neurons 1 and 3 have likely decreased (due to LTD not being strongly triggered).");
-    println!("One of the output neurons should now be specialized to fire in response to the pattern {:?}.", target_pattern);
+    println!("Weights should now change both upward and downward depending on precise spike timing.");
 }
