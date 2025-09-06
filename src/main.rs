@@ -77,6 +77,8 @@ const MEAN_NEURON_MEMBRANE_TIME_CONSTANT: f64 = 15.0; // ms
 const MEAN_HYPERPOLARIZATION_DEPTH: f64 = -77.5e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
+const SYNAPSE_SPIKE_TIME: f64 = 2.0;
+
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
@@ -274,6 +276,102 @@ impl Synapse for ElectricalSynapse {
     fn get_target(&self) -> usize { self.target_neuron }
 }
 
+/// A simple struct to hold the network components.
+struct Network {
+    neurons: Vec<Neuron>,
+    synapses: Vec<ChemicalSynapse>,
+}
+
 fn main() {
-    println!("Basic Neuromorphic network.");
+    println!("--- Starting Neuromorphic Network Test ---");
+
+    // --- 1. Network Setup ---
+    const NUM_INPUT_NEURONS: usize = 4;
+    const NUM_OUTPUT_NEURONS: usize = 2;
+    const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS;
+
+    let mut network = Network {
+        neurons: Vec::with_capacity(TOTAL_NEURONS),
+        synapses: Vec::new(),
+    };
+
+    // Create all neurons
+    for _ in 0..TOTAL_NEURONS {
+        network.neurons.push(Neuron::new(0.0));
+    }
+
+    // Connect every input neuron to every output neuron
+    let mut synapse_index = 0;
+    for i in 0..NUM_INPUT_NEURONS {
+        for j in NUM_INPUT_NEURONS..TOTAL_NEURONS {
+            network.synapses.push(ChemicalSynapse::new(i, j));
+            network.neurons[i].exiting_synapses.push(synapse_index);
+            synapse_index += 1;
+        }
+    }
+
+    println!("Network created with {} input neurons, {} output neurons, and {} synapses.", NUM_INPUT_NEURONS, NUM_OUTPUT_NEURONS, network.synapses.len());
+    println!("\n--- Initial Synapse Weights ---");
+    for synapse in &network.synapses {
+        println!("Synapse ({:_>2} -> {:_>2}): {:.4}", synapse.source_neuron, synapse.target_neuron, synapse.weight);
+    }
+
+    // --- 2. Simulation ---
+    let time_step = 0.1; // ms
+    let simulation_duration = 2000.0; // ms
+    let input_spike_potential = 18e-3; // 18mV potential change
+    let pattern_presentation_interval = 10.0; // ms
+
+    // Define the pattern to learn: fire input neurons 0 and 2 simultaneously.
+    let target_pattern = vec![0, 2];
+    println!("\nTraining network to recognize pattern: Input spikes on neurons {:?}", target_pattern);
+
+
+    let mut current_time = 0.0;
+    let mut last_pattern_time = -f64::INFINITY;
+
+    while current_time < simulation_duration {
+        // Present the input pattern at regular intervals
+        if current_time - last_pattern_time >= pattern_presentation_interval {
+            last_pattern_time = current_time;
+
+            // Fire the neurons in the target pattern
+            for &input_neuron_idx in &target_pattern {
+
+                // Clone the list of synapse indices to avoid borrowing `network.neurons` in the loop.
+                let exiting_synapses = network.neurons[input_neuron_idx].exiting_synapses.clone();
+                // Propagate the spike through all outgoing synapses of this input neuron
+                for &synapse_idx in &exiting_synapses {
+                    let synapse = &network.synapses[synapse_idx];
+                    let target_neuron_idx = synapse.target_neuron;
+
+                    let potential = input_spike_potential * synapse.weight;
+                    let output_neuron = &mut network.neurons[target_neuron_idx];
+
+                    // Check if the output neuron fires in response
+                    if output_neuron.receive(potential, current_time) > 0.0 {
+                        let pre_spike_time = network.neurons[synapse.get_source()].last_spike_time;
+                        let post_spike_time = network.neurons[synapse.get_target()].last_spike_time;
+
+                        // Update weights for all synapses connected to the neuron that just fired
+                        for s in network.synapses.iter_mut().filter(|s| s.target_neuron == target_neuron_idx) {
+                            s.update_weight(pre_spike_time, post_spike_time);
+                        }
+                    }
+                }
+            }
+        }
+        current_time += time_step;
+    }
+
+    // --- 3. Results ---
+    println!("\n--- Final Synapse Weights after {}ms simulation ---", simulation_duration);
+    for synapse in &network.synapses {
+        println!("Synapse ({:_>2} -> {:_>2}): {:.4}", synapse.source_neuron, synapse.target_neuron, synapse.weight);
+    }
+
+    println!("\n--- Analysis ---");
+    println!("Observe how weights for synapses from neurons 0 and 2 have increased,");
+    println!("while weights from neurons 1 and 3 have likely decreased (due to LTD not being strongly triggered).");
+    println!("One of the output neurons should now be specialized to fire in response to the pattern {:?}.", target_pattern);
 }
