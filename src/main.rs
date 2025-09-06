@@ -210,7 +210,7 @@ impl Synapse for ChemicalSynapse {
             * (WEIGHT_RANGE_END_VALUE
                 - (WEIGHT_NORMALIZATION_FACTOR * self.weight - WEIGHT_RANGE_END_VALUE).abs());
         // Clamp the weight to a valid range to prevent it from growing indefinitely
-        self.weight = sigmoid(self.weight - 0.5);
+        self.weight = self.weight.clamp(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT);
     }
 }
 
