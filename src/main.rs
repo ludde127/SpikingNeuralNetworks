@@ -59,6 +59,7 @@ threshold from the sum, and at next refractory time send again removing 3 and on
 
 */
 use std::sync::Arc;
+use rand_distr::num_traits::float::FloatCore;
 
 const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
 const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.999;
@@ -74,7 +75,7 @@ const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
 const MEAN_NEURON_RESTING_POTENTIAL: f64 = 0.0; // -70 millivolt
-const MEAN_NEURON_THRESHOLD: f64 = 15e-3; // -55 millivolt
+const MEAN_NEURON_THRESHOLD: f64 = 43e-3; // -55 millivolt
 const MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME: f64 = 1.5; // ms
 
 const MEAN_NEURON_MEMBRANE_TIME_CONSTANT: f64 = 15.0; // ms
@@ -82,7 +83,7 @@ const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
-const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 20e-3; // 20 millivolt change
+const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-3; // 20 millivolt change
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
@@ -184,7 +185,7 @@ impl Neuron {
 
         // Check if the neuron is ready to fire. It must be outside the refractory period and
         // its membrane potential must have reached the threshold.
-        println!("mem: {}, threshold: {}", self.membrane_potential, self.current_threshold(current_time));
+        //println!("mem: {}, threshold: {}", self.membrane_potential, self.current_threshold(current_time));
         if current_time - self.last_spike_time >= self.absolute_refractory_time
             && self.membrane_potential >= self.current_threshold(current_time)
         {
@@ -240,22 +241,23 @@ impl Synapse for ChemicalSynapse {
     /// `post_spike_time` is the time the target neuron fired.
     /// `learning_rate` determines the magnitude of the weight change.
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
-        let delta_t = post_spike_time - pre_spike_time;
+        let mut delta_t = post_spike_time - pre_spike_time;
         let mut delta_w = 0.0;
         // Long-Term Potentiation (LTP): Pre-synaptic spike before post-synaptic spike
-        if delta_t > 0.0 && delta_t <= LONG_TERM_POTENTIATION_TIME_WINDOW {
+        if delta_t > 0.0 {
             delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
-            self.weight += delta_w;
         }
         // Long-Term Depression (LTD): Post-synaptic spike before pre-synaptic spike
-        else if delta_t < 0.0 && delta_t >= -LONG_TERM_DEPRESSION_TIME_WINDOW {
+        else if delta_t < 0.0 {
             // 20ms window for LTD
-            delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
-            self.weight -= delta_w;
+            delta_t = delta_t.clamp(-SYNAPSE_LTP_DECAY, 0.0);
+            delta_w = -self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
         } else {
             // This happens if simultaneous firing or if the prespike neuron have never fired
+            println!("SKIPPING {}", delta_t);
             return;
         }
+        self.weight += delta_w;
 
         self.plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
             * (WEIGHT_RANGE_END_VALUE
@@ -269,8 +271,8 @@ impl Synapse for ChemicalSynapse {
         );
 
         println!(
-            "STDP: pre={} post={} Δt={:.2} Δw={:.4} new_w={:.4}",
-            self.source_neuron, self.target_neuron, delta_t, delta_w, self.weight
+            "STDP: pre={} post={} Δt={:.2} Δw={:.4} new_w={:.4}, pre_s={}, post_s={}",
+            self.source_neuron, self.target_neuron, delta_t, delta_w, self.weight, pre_spike_time, post_spike_time
         );
     }
 
@@ -516,9 +518,9 @@ fn main() {
         for j in 0..TOTAL_NEURONS {
             if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
-            synapses.push(ChemicalSynapse::new(j, i));
             neurons[i].exiting_synapses.push(synapse_index);
             synapse_index += 1;
+            synapses.push(ChemicalSynapse::new(j, i));
             neurons[j].exiting_synapses.push(synapse_index);
             synapse_index += 1;
         }
@@ -550,15 +552,15 @@ fn main() {
         target_pattern
     );
 
-    let steps_to_simulate = 1000;
+    let steps_to_simulate = 10000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
     let mut rng = rand::rng();
-    let amplitude = 70e-4;
+    let amplitude = 90e-4;
     for i in 0..steps_to_simulate {
         // Every 20 steps, present either pattern A or B
-        if i % 10 == 0 {
+        if i % 5 == 0 {
             if rng.gen_bool(0.5) {
                 // Pattern A: neurons 0 and 2 spike
                 input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
@@ -572,7 +574,7 @@ fn main() {
         }
     }
     input_vector.reverse();
-    network.simulate(steps_to_simulate, 1.0, &mut input_vector);
+    network.simulate(steps_to_simulate, 0.3, &mut input_vector);
 
     // --- 3. Results ---
     println!("\n--- Final Synapse Weights after simulation ---",);
