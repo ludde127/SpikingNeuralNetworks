@@ -79,6 +79,7 @@ const MEAN_HYPERPOLARIZATION_DEPTH: f64 = -77.5e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
+const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 20e-3; // 20 millivolt change
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
@@ -240,7 +241,8 @@ impl Synapse for ChemicalSynapse {
             delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
             self.weight -= delta_w;
         } else {
-            panic!("The connection can not be instant, was {}", delta_t);
+            // This happens if simultaneous firing or if the prespike neuron have never fired
+            return;
         }
 
         self.plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
@@ -353,7 +355,7 @@ impl Network {
             // Deliver all spike events scheduled for this timestep
             let mut i = 0;
             while i < self.event_queue.len() {
-                if self.event_queue[i].arrival_time >= self.current_time {
+                if self.event_queue[i].arrival_time <= self.current_time {
                     let event = self.event_queue.remove(i);
                     // --- 2. Mutably borrow target neuron and process spike ---
                     let target_idx = event.target_neuron;
@@ -365,7 +367,7 @@ impl Network {
                         .collect();
 
                     let target = &mut self.neurons[target_idx];
-                    let potential = event.weight;  // All have the same potential in this simplification
+                    let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;  // All have the same potential in this simplification
                     let action_potential = target.receive(potential, self.current_time);
                     let exiting = target.exiting_synapses.clone();
 
@@ -378,9 +380,7 @@ impl Network {
                         for synapse in incoming_syn_indices {
                             if (synapse.source_neuron != event.source_neuron) {continue};
                             let presynaptic_firing_time = self.neurons[synapse.source_neuron].last_spike_time;
-                            if presynaptic_firing_time < post_spike_time && presynaptic_firing_time != -f64::INFINITY {  // If the presynaptic neuron fired at same time as the target it would be ignored as it is in the refractory time.
-                                synapse.update_weight(presynaptic_firing_time, post_spike_time);
-                            }
+                            synapse.update_weight(presynaptic_firing_time, post_spike_time);
                         }
 
                         // --- 4. Propagate spikes through outgoing synapses ---
@@ -476,7 +476,7 @@ fn main() {
             input_vector.push(vec![0.0, 0.0, 0.0, 0.0]);
         }
     }
-
+    input_vector.reverse();
     network.simulate(steps_to_simulate, 1.0, &mut input_vector);
 
     // --- 3. Results ---
