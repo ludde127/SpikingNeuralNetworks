@@ -1,6 +1,7 @@
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use std::cmp::max;
+use std::f64::INFINITY;
 use std::iter::successors;
 /*
 ## Synapse
@@ -72,12 +73,12 @@ const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.005;
 const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
-const MEAN_NEURON_RESTING_POTENTIAL: f64 = -70e-3; // -70 millivolt
-const MEAN_NEURON_THRESHOLD: f64 = -55e-3; // -55 millivolt
+const MEAN_NEURON_RESTING_POTENTIAL: f64 = 0.0; // -70 millivolt
+const MEAN_NEURON_THRESHOLD: f64 = 15e-3; // -55 millivolt
 const MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME: f64 = 1.5; // ms
 
 const MEAN_NEURON_MEMBRANE_TIME_CONSTANT: f64 = 15.0; // ms
-const MEAN_HYPERPOLARIZATION_DEPTH: f64 = -77.5e-3; // V
+const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
@@ -183,6 +184,7 @@ impl Neuron {
 
         // Check if the neuron is ready to fire. It must be outside the refractory period and
         // its membrane potential must have reached the threshold.
+        println!("mem: {}, threshold: {}", self.membrane_potential, self.current_threshold(current_time));
         if current_time - self.last_spike_time >= self.absolute_refractory_time
             && self.membrane_potential >= self.current_threshold(current_time)
         {
@@ -195,7 +197,6 @@ impl Neuron {
             // Return a standard action potential value.
             return 1.0;
         }
-
         // If the neuron did not fire, return 0.0.
         0.0
     }
@@ -511,13 +512,20 @@ fn main() {
 
     // Connect every input neuron to every output neuron
     let mut synapse_index = 0;
-    for i in 0..NUM_INPUT_NEURONS {
-        input_neurons.push(i);
-        for j in NUM_INPUT_NEURONS..TOTAL_NEURONS {
+    for i in 0..TOTAL_NEURONS {
+        for j in 0..TOTAL_NEURONS {
+            if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
+            synapses.push(ChemicalSynapse::new(j, i));
             neurons[i].exiting_synapses.push(synapse_index);
             synapse_index += 1;
+            neurons[j].exiting_synapses.push(synapse_index);
+            synapse_index += 1;
         }
+    }
+
+    for i in 0..NUM_INPUT_NEURONS {
+        input_neurons.push(i);
     }
 
     for i in TOTAL_NEURONS - NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
@@ -546,11 +554,20 @@ fn main() {
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
-    let amplitude = 25e-3;
+    let mut rng = rand::rng();
+    let amplitude = 70e-4;
     for i in 0..steps_to_simulate {
-        if (i % 10 == 0) {
-            input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
+        // Every 20 steps, present either pattern A or B
+        if i % 10 == 0 {
+            if rng.gen_bool(0.5) {
+                // Pattern A: neurons 0 and 2 spike
+                input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
+            } else {
+                // Pattern B: neurons 1 and 3 spike
+                input_vector.push(vec![0.0, amplitude, 0.0, amplitude]);
+            }
         } else {
+            // Silence otherwise
             input_vector.push(vec![0.0, 0.0, 0.0, 0.0]);
         }
     }
