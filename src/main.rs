@@ -70,7 +70,7 @@ const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
 const SYNAPSE_LTD_DECAY: f64 = 10.0;
 
-const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.005;
+const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.01;
 const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
@@ -475,9 +475,23 @@ impl Network {
                     } else {
                         // --- POST did NOT spike ---
                         // LTD: update *this* synapse against last post spike
-                        if target_last_spike_time.is_finite() {
-                            self.synapses[event.synapse_index]
-                                .update_weight(event.spike_time, target_last_spike_time);
+                        // We should do this for all synapses connected to this target neuron
+
+                        for &syn_idx in &incoming_syn_indices {
+                            let source_idx = self.synapses[syn_idx].source_neuron;
+                            let neuron = &self.neurons[source_idx];
+                            let pre_time = if neuron.last_spike_time == self.current_time
+                                && source_idx == event.source_neuron
+                            {
+                                event.spike_time
+                            } else {
+                                neuron.last_spike_time
+                            };
+
+                            if pre_time.is_finite() {
+                                self.synapses[syn_idx]
+                                    .update_weight(pre_time, target_last_spike_time);
+                            }
                         }
                     }
                 } else {
