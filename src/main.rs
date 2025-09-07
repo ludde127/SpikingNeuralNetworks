@@ -118,7 +118,7 @@ impl Neuron {
             membrane_potential: MEAN_NEURON_RESTING_POTENTIAL, // Start at rest
             threshold: MEAN_NEURON_THRESHOLD * (1.0 + potential_dist.sample(&mut rng)),
             membrane_time_constant: MEAN_NEURON_MEMBRANE_TIME_CONSTANT * (1.0 + time_dist.sample(&mut rng)),
-            last_spike_time: -f64::INFINITY, // Initialize to never have spiked
+            last_spike_time: -1.0, // Initialize to never have spiked
             absolute_refractory_time: MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME * (1.0 + time_dist.sample(&mut rng)),
             exiting_synapses: Vec::new(),
             relative_refractory_duration: 5.0, // Example value
@@ -243,7 +243,6 @@ impl Synapse for ChemicalSynapse {
             self.weight -= delta_w;
         } else {
             // This happens if simultaneous firing or if the prespike neuron have never fired
-            println!("delta t {}", delta_t);
             return;
         }
 
@@ -297,6 +296,7 @@ impl Synapse for ElectricalSynapse {
 struct SpikeEvent {
     source_neuron: usize,
     target_neuron: usize,
+    synapse_index: usize,
     spike_time: f64,
     arrival_time: f64,
     weight: f64,
@@ -353,6 +353,7 @@ impl Network {
                             spike_time: self.current_time,
                             arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
                             weight: synapse.weight,
+                            synapse_index: synapse_idx,
                         });
                     }
                     self.neurons[input_neuron_idx].last_spike_time = self.current_time;
@@ -379,32 +380,13 @@ impl Network {
                         .collect();
 
                     let target = &mut self.neurons[target_idx];
+                    let mut target_last_spike_time = target.last_spike_time;
                     let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;  // All have the same potential in this simplification
                     let action_potential = target.receive(potential, self.current_time);
                     let exiting = target.exiting_synapses.clone();
 
                     if  action_potential > 0.0 {
-                        //println!("Inner Neuron {} spiked", target_idx);
-                        let post_spike_time = target.last_spike_time;
-
-
-                        // Update incoming synapse weights (STDP) using event.spike_time as presynaptic time
-                        for &syn_idx in &incoming_syn_indices {
-                            let source_idx = self.synapses[syn_idx].source_neuron;
-                            let neuron = &self.neurons[source_idx];
-                            let presynaptic_firing_time = neuron.last_spike_time; // TODO does not correctly handle electrical synapses which are bidirectional
-                            // guard: if presynaptic time is -inf or NaN, skip
-                            if !presynaptic_firing_time.is_finite() {
-                                continue;
-                            }
-                            if presynaptic_firing_time == self.current_time && source_idx == event.source_neuron {
-                                // Assume that it spike at the spike time of the event.
-                                self.synapses[syn_idx].update_weight(event.spike_time, self.current_time);
-                            } else {
-                                self.synapses[syn_idx].update_weight(presynaptic_firing_time, self.current_time);
-                            }
-                        }
-
+                        target_last_spike_time = self.current_time;
                         // --- 4. Propagate spikes through outgoing synapses ---
                         for out_syn_idx in exiting {
                             let out_syn = &self.synapses[out_syn_idx];
@@ -414,7 +396,24 @@ impl Network {
                                 spike_time: self.current_time,
                                 arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
                                 weight: out_syn.weight,
+                                synapse_index: out_syn_idx,
                             });
+                        }
+                    }
+                    // Update incoming synapse weights (STDP) using event.spike_time as presynaptic time
+                    for &syn_idx in &incoming_syn_indices {
+                        let source_idx = self.synapses[syn_idx].source_neuron;
+                        let neuron = &self.neurons[source_idx];
+                        let presynaptic_firing_time = neuron.last_spike_time; // TODO does not correctly handle electrical synapses which are bidirectional
+                        // guard: if presynaptic time is -inf or NaN, skip
+                        if !presynaptic_firing_time.is_finite() {
+                            continue;
+                        }
+                        if presynaptic_firing_time == self.current_time && source_idx == event.source_neuron && target_last_spike_time == self.current_time {
+                            // Assume that it spike at the spike time of the event.
+                            self.synapses[syn_idx].update_weight(event.spike_time, target_last_spike_time);
+                        } else {
+                            self.synapses[syn_idx].update_weight(presynaptic_firing_time, target_last_spike_time);
                         }
                     }
                 } else {
