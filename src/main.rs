@@ -1,8 +1,5 @@
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
-use std::cmp::max;
-use std::f64::INFINITY;
-use std::iter::successors;
 /*
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
@@ -58,7 +55,6 @@ If a neuron gets a sum of 20 as input and has threshold as 3 it would send a sig
 threshold from the sum, and at next refractory time send again removing 3 and on and on.
 
 */
-use std::sync::Arc;
 use rand_distr::num_traits::float::FloatCore;
 
 const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
@@ -254,7 +250,6 @@ impl Synapse for ChemicalSynapse {
             delta_w = -self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
         } else {
             // This happens if simultaneous firing or if the prespike neuron have never fired
-            println!("SKIPPING {}", delta_t);
             return;
         }
         self.weight += delta_w;
@@ -270,10 +265,10 @@ impl Synapse for ChemicalSynapse {
             MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
         );
 
-        println!(
+        /*println!(
             "STDP: pre={} post={} Δt={:.2} Δw={:.4} new_w={:.4}, pre_s={}, post_s={}",
             self.source_neuron, self.target_neuron, delta_t, delta_w, self.weight, pre_spike_time, post_spike_time
-        );
+        );*/
     }
 
     /// Constructor for a new chemical synapse with a random initial weight.
@@ -488,7 +483,7 @@ fn main() {
     // --- 1. Network Setup ---
     const NUM_INPUT_NEURONS: usize = 4;
     const NUM_OUTPUT_NEURONS: usize = 2;
-    const HIDDEN: usize = 0;
+    const HIDDEN: usize = 20;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + HIDDEN;
     const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
