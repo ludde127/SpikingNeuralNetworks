@@ -613,7 +613,7 @@ fn main() {
         target_pattern
     );
 
-    let steps_to_simulate = 200;
+    let steps_to_simulate = 1000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
@@ -635,7 +635,7 @@ fn main() {
         }
     }
     input_vector.reverse();
-    let potentials = network.simulate(steps_to_simulate, 0.3, &mut input_vector);
+    let potentials = network.simulate(steps_to_simulate, 0.01, &mut input_vector);
 
     // Export network graph
     network.visualize_graph("network.dot");
