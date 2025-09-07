@@ -66,7 +66,7 @@ const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
 const SYNAPSE_LTD_DECAY: f64 = 10.0;
 
-const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.5;
+const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.05;
 const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
@@ -489,8 +489,8 @@ fn main() {
     // --- 1. Network Setup ---
     const NUM_INPUT_NEURONS: usize = 4;
     const NUM_OUTPUT_NEURONS: usize = 2;
-    const HIDDEN: usize = 20;
-    const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + HIDDEN;
+    const NUM_HIDDEN_NEURONS: usize = 20;
+    const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS;
     const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
     let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
@@ -533,8 +533,6 @@ fn main() {
         NUM_OUTPUT_NEURONS,
         network.synapses.len()
     );
-    println!("\n--- Initial Synapse Weights ---");
-    network.print_synapse_weight();
 
     // --- 2. Simulation ---
     let target_pattern = vec![0, 2]; // neurons that fire together
@@ -570,8 +568,4 @@ fn main() {
     // --- 3. Results ---
     println!("\n--- Final Synapse Weights after simulation ---",);
     network.print_synapse_weight();
-    println!("\n--- Analysis ---");
-    println!(
-        "Weights should now change both upward and downward depending on precise spike timing."
-    );
 }
