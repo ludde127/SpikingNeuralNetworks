@@ -1,3 +1,4 @@
+use std::cmp::max;
 use rand::Rng;
 use rand_distr::{Normal, Distribution};
 /*
@@ -227,22 +228,27 @@ impl Synapse for ChemicalSynapse {
     /// `learning_rate` determines the magnitude of the weight change.
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
         let delta_t = post_spike_time - pre_spike_time;
-
+        let mut delta_w = 0.0;
         // Long-Term Potentiation (LTP): Pre-synaptic spike before post-synaptic spike
         if delta_t > 0.0 && delta_t <= LONG_TERM_POTENTIATION_TIME_WINDOW {
-            let delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
+            delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
             self.weight += delta_w;
         }
         // Long-Term Depression (LTD): Post-synaptic spike before pre-synaptic spike
         else if delta_t < 0.0 && delta_t >= -LONG_TERM_DEPRESSION_TIME_WINDOW {
             // 20ms window for LTD
-            let delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
+            delta_w = self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
             self.weight -= delta_w;
+        } else {
+            panic!("The connection can not be instant, was {}", delta_t);
         }
+
         self.plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
             * (WEIGHT_RANGE_END_VALUE
                 - (WEIGHT_NORMALIZATION_FACTOR * self.weight - WEIGHT_RANGE_END_VALUE).abs());
         // Clamp the weight to a valid range to prevent it from growing indefinitely
+
+        //println!("{}->{}, delta weight {}, delta_t {}", self.source_neuron, self.target_neuron, delta_w, delta_t);
         self.weight = self.weight.clamp(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT);
     }
 
@@ -325,7 +331,7 @@ impl Network {
             for (input_neuron_idx, value) in input.iter().enumerate() {
                 let spike = self.neurons[input_neuron_idx].receive(value.clone(), self.current_time);
                 if (spike > 0.0) {
-                    println!("Input Neuron {} spiked", input_neuron_idx);
+                    //println!("Input Neuron {} spiked", input_neuron_idx);
                     // The neuron spiked so we must propagate it
                     let exiting_synapses =
                         self.neurons[input_neuron_idx].exiting_synapses.clone();
@@ -347,42 +353,37 @@ impl Network {
             // Deliver all spike events scheduled for this timestep
             let mut i = 0;
             while i < self.event_queue.len() {
-                if self.event_queue[i].arrival_time <= self.current_time {
+                if self.event_queue[i].arrival_time >= self.current_time {
                     let event = self.event_queue.remove(i);
                     // --- 2. Mutably borrow target neuron and process spike ---
                     let target_idx = event.target_neuron;
 
                     let incoming_syn_indices: Vec<_> = self
                         .synapses
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, s)| s.target_neuron == event.target_neuron)
-                        .map(|(idx, _)| idx)
+                        .iter_mut()
+                        .filter(|s| s.target_neuron == event.target_neuron)
                         .collect();
 
-
-                    let pre_spike_times: Vec<f64> = incoming_syn_indices
-                        .iter()
-                        .map(|&idx| {
-                            let src = self.synapses[idx].get_source();
-                            self.neurons[src].last_spike_time
-                        })
-                        .collect();
                     let target = &mut self.neurons[target_idx];
                     let potential = event.weight;  // All have the same potential in this simplification
+                    let action_potential = target.receive(potential, self.current_time);
+                    let exiting = target.exiting_synapses.clone();
 
-                    if target.receive(potential, self.current_time) > 0.0 {
-                        println!("Inner Neuron {} spiked", target_idx);
+                    if  action_potential > 0.0 {
+                        //println!("Inner Neuron {} spiked", target_idx);
                         let post_spike_time = target.last_spike_time;
 
 
                         // --- 3. Update incoming synapse weights (STDP) ---
-                        for (syn_idx, pre_time) in incoming_syn_indices.into_iter().zip(pre_spike_times) {
-                            self.synapses[syn_idx].update_weight(pre_time, post_spike_time);
+                        for synapse in incoming_syn_indices {
+                            if (synapse.source_neuron != event.source_neuron) {continue};
+                            let presynaptic_firing_time = self.neurons[synapse.source_neuron].last_spike_time;
+                            if presynaptic_firing_time < post_spike_time && presynaptic_firing_time != -f64::INFINITY {  // If the presynaptic neuron fired at same time as the target it would be ignored as it is in the refractory time.
+                                synapse.update_weight(presynaptic_firing_time, post_spike_time);
+                            }
                         }
 
                         // --- 4. Propagate spikes through outgoing synapses ---
-                        let exiting = target.exiting_synapses.clone();
                         for out_syn_idx in exiting {
                             let out_syn = &self.synapses[out_syn_idx];
                             self.event_queue.push(SpikeEvent {
@@ -408,7 +409,8 @@ fn main() {
     // --- 1. Network Setup ---
     const NUM_INPUT_NEURONS: usize = 4;
     const NUM_OUTPUT_NEURONS: usize = 2;
-    const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS;
+    const HIDDEN: usize = 0;
+    const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + HIDDEN;
     const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
     let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
@@ -462,11 +464,11 @@ fn main() {
 
 
 
-    let steps_to_simulate = 1000;
+    let steps_to_simulate = 5000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
-    let amplitude = 0.5;
+    let amplitude = 50e-3;
     for i in 0..steps_to_simulate {
         if (i % 10 == 0) {
             input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
