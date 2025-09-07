@@ -1,5 +1,10 @@
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
+use plotters::prelude::*;
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::dot::{Dot, Config};
+use std::fs::File;
+use std::io::Write;
 /*
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
@@ -363,7 +368,10 @@ impl Network {
         steps_to_simulate: usize,
         step_size_ms: f64,
         inputs: &mut Vec<Vec<f64>>,
-    ) {
+    ) -> Vec<Vec<f64>> {
+
+        let mut potentials: Vec<Vec<f64>> = Vec::new();
+
         let mut spike_event_counter: usize = 0;
         assert_eq!(
             steps_to_simulate,
@@ -371,7 +379,7 @@ impl Network {
             "Steps to simulate and inputs length should be equal"
         );
         let simulation_end = self.current_time + (steps_to_simulate as f64) * step_size_ms;
-        while self.current_time < simulation_end {
+        while self.current_time + step_size_ms < simulation_end {
             self.current_time += step_size_ms;
 
             // 1. Present the input pattern
@@ -409,77 +417,144 @@ impl Network {
             }
 
             // Deliver all spike events scheduled for this timestep
-            let mut i = 0;
-            while i < self.event_queue.len() {
-                if self.event_queue[i].arrival_time <= self.current_time {
-                    spike_event_counter += 1;
-                    let event = self.event_queue.remove(i);
-                    let target_idx = event.target_neuron;
-
-                    let incoming_syn_indices: Vec<usize> = self
-                        .synapses
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, s)| {
-                            if s.target_neuron == event.target_neuron {
-                                Some(idx)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    let target = &mut self.neurons[target_idx];
-                    let mut target_last_spike_time = target.last_spike_time;
-                    let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
-                    let action_potential = target.receive(potential, self.current_time);
-                    let exiting = target.exiting_synapses.clone();
-
-                    if action_potential > 0.0 {
-                        // --- POST neuron spiked now ---
-                        target_last_spike_time = self.current_time;
-
-                        // propagate spikes
-                        for out_syn_idx in exiting {
-                            let out_syn = &self.synapses[out_syn_idx];
-                            if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
-                                continue;
-                            }
-                            self.event_queue.push(SpikeEvent {
-                                source_neuron: target_idx,
-                                target_neuron: out_syn.target_neuron,
-                                spike_time: self.current_time,
-                                arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
-                                weight: out_syn.weight,
-                                synapse_index: out_syn_idx,
-                            });
-                        }
-                    }
-                    for &syn_idx in &incoming_syn_indices {
-                        let source_idx = self.synapses[syn_idx].source_neuron;
-                        let neuron = &self.neurons[source_idx];
-                        let pre_time = if neuron.last_spike_time == self.current_time
-                            && source_idx == event.source_neuron
-                        {
-                            event.spike_time
-                        } else {
-                            neuron.last_spike_time
-                        };
-
-                        if pre_time.is_finite() {
-                            self.synapses[syn_idx]
-                                .update_weight(pre_time, target_last_spike_time);
-                        }
-                    }
-                } else {
-                    i += 1;
-                }
-            }
+            self.process_events(&mut spike_event_counter);
+            let snapshot: Vec<f64> = self.neurons.iter().map(|n| n.membrane_potential).collect();
+            potentials.push(snapshot);
         }
         println!(
             "Finished simulation, handled {} spike events",
             spike_event_counter
         );
+        potentials
+    }
+
+    fn process_events(&mut self, spike_event_counter: &mut usize) {
+        let mut i = 0;
+        while i < self.event_queue.len() {
+            if self.event_queue[i].arrival_time <= self.current_time {
+                *spike_event_counter += 1;
+                let event = self.event_queue.remove(i);
+                let target_idx = event.target_neuron;
+
+                let incoming_syn_indices: Vec<usize> = self
+                    .synapses
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, s)| {
+                        if s.target_neuron == event.target_neuron {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                let target = &mut self.neurons[target_idx];
+                let mut target_last_spike_time = target.last_spike_time;
+                let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
+                let action_potential = target.receive(potential, self.current_time);
+                let exiting = target.exiting_synapses.clone();
+
+                if action_potential > 0.0 {
+                    // --- POST neuron spiked now ---
+                    target_last_spike_time = self.current_time;
+
+                    // propagate spikes
+                    for out_syn_idx in exiting {
+                        let out_syn = &self.synapses[out_syn_idx];
+                        if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+                            continue;
+                        }
+                        self.event_queue.push(SpikeEvent {
+                            source_neuron: target_idx,
+                            target_neuron: out_syn.target_neuron,
+                            spike_time: self.current_time,
+                            arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
+                            weight: out_syn.weight,
+                            synapse_index: out_syn_idx,
+                        });
+                    }
+                }
+                for &syn_idx in &incoming_syn_indices {
+                    let source_idx = self.synapses[syn_idx].source_neuron;
+                    let neuron = &self.neurons[source_idx];
+                    let pre_time = if neuron.last_spike_time == self.current_time
+                        && source_idx == event.source_neuron
+                    {
+                        event.spike_time
+                    } else {
+                        neuron.last_spike_time
+                    };
+
+                    if pre_time.is_finite() {
+                        self.synapses[syn_idx]
+                            .update_weight(pre_time, target_last_spike_time);
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn visualize_graph(&self, filename: &str) {
+        let mut g = DiGraph::<usize, f64>::new();
+        let mut node_indices = Vec::with_capacity(self.neurons.len());
+
+        // Add all neurons
+        for i in 0..self.neurons.len() {
+            node_indices.push(g.add_node(i));
+        }
+
+        // Add synapses with weights
+        for s in &self.synapses {
+            g.add_edge(
+                node_indices[s.source_neuron],
+                node_indices[s.target_neuron],
+                s.weight,
+            );
+        }
+
+        // Export DOT format for Graphviz
+        let dot = Dot::with_config(&g, &[Config::EdgeNoLabel]);
+        let mut f = File::create(filename).unwrap();
+        writeln!(f, "{:?}", dot).unwrap();
+        println!("Graph exported to {}", filename);
+        println!("Run: dot -Tpng {} -o network.png", filename);
+    }
+
+    /// Plot membrane potentials of input and output neurons over time.
+    fn plot_membrane_potentials(
+        &self,
+        potentials: &Vec<Vec<f64>>,
+        filename: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = BitMapBackend::new(filename, (1280, 720)).into_drawing_area();
+        root.fill(&WHITE)?;
+
+        let mut chart = ChartBuilder::on(&root)
+            .caption("Membrane Potentials of Input & Output Neurons", ("sans-serif", 30))
+            .margin(10)
+            .x_label_area_size(40)
+            .y_label_area_size(60)
+            .build_cartesian_2d(0..potentials.len(), -0.1f64..0.1f64)?;
+
+        chart.configure_mesh().draw()?;
+
+        for (i, idx) in self.input_neurons.iter().chain(self.output_neurons.iter()).enumerate() {
+            let series: Vec<(usize, f64)> =
+                potentials.iter().enumerate().map(|(t, v)| (t, v[*idx])).collect();
+            chart
+                .draw_series(LineSeries::new(series, &Palette99::pick(i)))?
+                .label(format!("Neuron {}", idx))
+                .legend(move |(x, y)| {
+                    PathElement::new(vec![(x, y), (x + 20, y)], Palette99::pick(i))
+                });
+        }
+
+        chart.configure_series_labels().border_style(&BLACK).draw()?;
+
+        Ok(())
     }
 }
 
@@ -489,7 +564,7 @@ fn main() {
     // --- 1. Network Setup ---
     const NUM_INPUT_NEURONS: usize = 4;
     const NUM_OUTPUT_NEURONS: usize = 2;
-    const NUM_HIDDEN_NEURONS: usize = 20;
+    const NUM_HIDDEN_NEURONS: usize = 3;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS;
     const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
@@ -510,9 +585,6 @@ fn main() {
             if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
-            synapse_index += 1;
-            synapses.push(ChemicalSynapse::new(j, i));
-            neurons[j].exiting_synapses.push(synapse_index);
             synapse_index += 1;
         }
     }
@@ -541,7 +613,7 @@ fn main() {
         target_pattern
     );
 
-    let steps_to_simulate = 10000;
+    let steps_to_simulate = 200;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
@@ -563,7 +635,13 @@ fn main() {
         }
     }
     input_vector.reverse();
-    network.simulate(steps_to_simulate, 0.3, &mut input_vector);
+    let potentials = network.simulate(steps_to_simulate, 0.3, &mut input_vector);
+
+    // Export network graph
+    network.visualize_graph("network.dot");
+
+    // Plot membrane potentials
+    network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
 
     // --- 3. Results ---
     println!("\n--- Final Synapse Weights after simulation ---",);
