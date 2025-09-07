@@ -497,26 +497,53 @@ impl Network {
         }
     }
 
+    /// Visualize network as a directed graph with weights on edges.
     fn visualize_graph(&self, filename: &str) {
-        let mut g = DiGraph::<usize, f64>::new();
+        let mut g = DiGraph::<usize, (f64, String)>::new();
         let mut node_indices = Vec::with_capacity(self.neurons.len());
 
-        // Add all neurons
+        // Add neurons
         for i in 0..self.neurons.len() {
             node_indices.push(g.add_node(i));
         }
 
-        // Add synapses with weights
+        // Add synapses with weights > 0
         for s in &self.synapses {
-            g.add_edge(
-                node_indices[s.source_neuron],
-                node_indices[s.target_neuron],
-                s.weight,
-            );
+            if s.weight > 0.0 {
+                let color = if s.weight < 0.33 {
+                    "blue"
+                } else if s.weight < 0.66 {
+                    "green"
+                } else {
+                    "red"
+                };
+                g.add_edge(
+                    node_indices[s.source_neuron],
+                    node_indices[s.target_neuron],
+                    (s.weight, color.to_string()),
+                );
+            }
         }
 
-        // Export DOT format for Graphviz
-        let dot = Dot::with_config(&g, &[Config::EdgeNoLabel]);
+        // Export DOT with labels + colors
+        let dot = Dot::with_attr_getters(
+            &g,
+            &[Config::EdgeNoLabel],
+            &|_, e| {
+                let (w, color) = e.weight();
+                format!(
+                    "label=\"{:.2}\" color={} fontcolor={} penwidth={}",
+                    w,
+                    color,
+                    color,
+                    1.0 + 4.0 * w, // thickness based on weight
+                )
+            },
+            &|_, n| {
+                format!("label=\"N{}\"", n.0.index())
+            },
+        );
+
         let mut f = File::create(filename).unwrap();
         writeln!(f, "{:?}", dot).unwrap();
         println!("Graph exported to {}", filename);
