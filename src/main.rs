@@ -84,7 +84,7 @@ const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
-const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-3; // 20 millivolt change
+const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2.0e-1; // 20 millivolt change
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
@@ -632,7 +632,7 @@ fn main() {
         network.synapses.len()
     );
 
-    let steps_to_simulate = 100000;
+    let steps_to_simulate = 100;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
