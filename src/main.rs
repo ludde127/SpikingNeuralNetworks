@@ -277,10 +277,129 @@ impl Synapse for ElectricalSynapse {
     fn get_target(&self) -> usize { self.target_neuron }
 }
 
+
+#[derive(Clone, Debug)]
+struct SpikeEvent {
+    source_neuron: usize,
+    target_neuron: usize,
+    spike_time: f64,
+    arrival_time: f64,
+    weight: f64,
+}
+
 /// A simple struct to hold the network components.
 struct Network {
     neurons: Vec<Neuron>,
     synapses: Vec<ChemicalSynapse>,
+    event_queue: Vec<SpikeEvent>,
+    current_time: f64,
+    input_neurons: Vec<usize>,
+    output_neurons: Vec<usize>,
+}
+
+impl Network {
+    fn new(neurons: Vec<Neuron>, synapses: Vec<ChemicalSynapse>, input_neurons: Vec<usize>, output_neurons: Vec<usize>) -> Self {
+        Network { neurons, synapses, event_queue: Vec::new(), current_time: 0.0, input_neurons, output_neurons }
+    }
+
+    fn print_synapse_weight(&self) {
+        for synapse in &self.synapses {
+            println!(
+                "Synapse ({:_>2} -> {:_>2}): {:.4}",
+                synapse.source_neuron, synapse.target_neuron, synapse.weight
+            );
+        }
+    }
+
+    fn simulate(&mut self, steps_to_simulate: usize, step_size_ms: f64, inputs: &mut Vec<Vec<f64>>) {
+        assert_eq!(steps_to_simulate, inputs.len(), "Steps to simulate and inputs length should be equal");
+        let simulation_end = self.current_time + (steps_to_simulate as f64) * step_size_ms;
+        while self.current_time < simulation_end {
+            self.current_time += step_size_ms;
+
+            // 1. Present the input pattern
+
+            let input = inputs.pop().unwrap();
+            assert_eq!(input.len(), self.input_neurons.len(), "Inputs at each timestep must have values for all neurons");
+
+            for (input_neuron_idx, value) in input.iter().enumerate() {
+                let spike = self.neurons[input_neuron_idx].receive(value.clone(), self.current_time);
+                if (spike > 0.0) {
+                    println!("Input Neuron {} spiked", input_neuron_idx);
+                    // The neuron spiked so we must propagate it
+                    let exiting_synapses =
+                        self.neurons[input_neuron_idx].exiting_synapses.clone();
+                    for &synapse_idx in &exiting_synapses {
+                        let synapse = &self.synapses[synapse_idx];
+                        self.event_queue.push(SpikeEvent {
+                            source_neuron: input_neuron_idx,
+                            target_neuron: synapse.target_neuron,
+                            spike_time: self.current_time,
+                            arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
+                            weight: synapse.weight,
+                        });
+                    }
+                    self.neurons[input_neuron_idx].last_spike_time = self.current_time;
+                }
+
+            }
+
+            // Deliver all spike events scheduled for this timestep
+            let mut i = 0;
+            while i < self.event_queue.len() {
+                if self.event_queue[i].arrival_time <= self.current_time {
+                    let event = self.event_queue.remove(i);
+                    // --- 2. Mutably borrow target neuron and process spike ---
+                    let target_idx = event.target_neuron;
+
+                    let incoming_syn_indices: Vec<_> = self
+                        .synapses
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, s)| s.target_neuron == event.target_neuron)
+                        .map(|(idx, _)| idx)
+                        .collect();
+
+
+                    let pre_spike_times: Vec<f64> = incoming_syn_indices
+                        .iter()
+                        .map(|&idx| {
+                            let src = self.synapses[idx].get_source();
+                            self.neurons[src].last_spike_time
+                        })
+                        .collect();
+                    let target = &mut self.neurons[target_idx];
+                    let potential = event.weight;  // All have the same potential in this simplification
+
+                    if target.receive(potential, self.current_time) > 0.0 {
+                        println!("Inner Neuron {} spiked", target_idx);
+                        let post_spike_time = target.last_spike_time;
+
+
+                        // --- 3. Update incoming synapse weights (STDP) ---
+                        for (syn_idx, pre_time) in incoming_syn_indices.into_iter().zip(pre_spike_times) {
+                            self.synapses[syn_idx].update_weight(pre_time, post_spike_time);
+                        }
+
+                        // --- 4. Propagate spikes through outgoing synapses ---
+                        let exiting = target.exiting_synapses.clone();
+                        for out_syn_idx in exiting {
+                            let out_syn = &self.synapses[out_syn_idx];
+                            self.event_queue.push(SpikeEvent {
+                                source_neuron: target_idx,
+                                target_neuron: out_syn.target_neuron,
+                                spike_time: self.current_time,
+                                arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
+                                weight: out_syn.weight,
+                            });
+                        }
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
 }
 
 fn main() {
@@ -292,25 +411,38 @@ fn main() {
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS;
     const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
-    let mut network = Network {
-        neurons: Vec::with_capacity(TOTAL_NEURONS),
-        synapses: Vec::new(),
-    };
+    let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
+    let mut synapses = Vec::with_capacity(TOTAL_NEURONS);
+    let mut input_neurons = Vec::with_capacity(NUM_INPUT_NEURONS);
+    let mut output_neurons = Vec::with_capacity(NUM_OUTPUT_NEURONS);
 
     // Create all neurons
     for _ in 0..TOTAL_NEURONS {
-        network.neurons.push(Neuron::new(0.0));
+        neurons.push(Neuron::new(0.0));
     }
 
     // Connect every input neuron to every output neuron
     let mut synapse_index = 0;
     for i in 0..NUM_INPUT_NEURONS {
+        input_neurons.push(i);
         for j in NUM_INPUT_NEURONS..TOTAL_NEURONS {
-            network.synapses.push(ChemicalSynapse::new(i, j));
-            network.neurons[i].exiting_synapses.push(synapse_index);
+            synapses.push(ChemicalSynapse::new(i, j));
+            neurons[i].exiting_synapses.push(synapse_index);
             synapse_index += 1;
         }
     }
+
+    for i in TOTAL_NEURONS-NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
+        output_neurons.push(i);
+    }
+
+    let mut network = Network::new(
+        neurons,
+        synapses,
+        input_neurons,
+        output_neurons
+    );
+
 
     println!(
         "Network created with {} input neurons, {} output neurons, and {} synapses.",
@@ -319,131 +451,37 @@ fn main() {
         network.synapses.len()
     );
     println!("\n--- Initial Synapse Weights ---");
-    for synapse in &network.synapses {
-        println!(
-            "Synapse ({:_>2} -> {:_>2}): {:.4}",
-            synapse.source_neuron, synapse.target_neuron, synapse.weight
-        );
-    }
+    network.print_synapse_weight();
 
     // --- 2. Simulation ---
-    let time_step = 0.1; // ms
-    let simulation_duration = 2000.0; // ms
-    let input_spike_potential = 18e-3; // 18mV potential change
-    let pattern_presentation_interval = 10.0; // ms
     let target_pattern = vec![0, 2]; // neurons that fire together
     println!(
         "\nTraining network to recognize pattern: Input spikes on neurons {:?}",
         target_pattern
     );
 
-    #[derive(Clone, Debug)]
-    struct SpikeEvent {
-        source_neuron: usize,
-        target_neuron: usize,
-        arrival_time: f64,
-        weight: f64,
+
+
+    let steps_to_simulate = 1000;
+
+    let mut input_vector = Vec::with_capacity(steps_to_simulate);
+
+    let amplitude = 0.5;
+    for i in 0..steps_to_simulate {
+        if (i % 10 == 0) {
+            input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
+        } else {
+            input_vector.push(vec![0.0, 0.0, 0.0, 0.0]);
+        }
     }
 
-    let mut event_queue: Vec<SpikeEvent> = Vec::new();
-
-    let mut current_time = 0.0;
-    let mut last_pattern_time = -f64::INFINITY;
-    let total_time: f64 = 100.0; // ms
-
-    while current_time < simulation_duration {
-        // 1. Present the input pattern
-        if current_time - last_pattern_time >= pattern_presentation_interval {
-            last_pattern_time = current_time;
-            for &input_neuron_idx in &target_pattern {
-                let exiting_synapses =
-                    network.neurons[input_neuron_idx].exiting_synapses.clone();
-                for &synapse_idx in &exiting_synapses {
-                    let synapse = &network.synapses[synapse_idx];
-                    event_queue.push(SpikeEvent {
-                        source_neuron: input_neuron_idx,
-                        target_neuron: synapse.target_neuron,
-                        arrival_time: current_time + SYNAPSE_DELAY,
-                        weight: synapse.weight,
-                    });
-                }
-                network.neurons[input_neuron_idx].last_spike_time = current_time;
-            }
-        }
-
-        let time_step: f64 = 1.0;    // ms
-        while current_time < total_time {
-            // Deliver all spike events scheduled for this timestep
-            let mut i = 0;
-            while i < event_queue.len() {
-                if event_queue[i].arrival_time <= current_time {
-                    let event = event_queue.remove(i);
-
-                    // --- 1. Gather pre-spike times before mutable borrow ---
-                    let incoming_syn_indices: Vec<_> = network
-                        .synapses
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, s)| s.target_neuron == event.target_neuron)
-                        .map(|(idx, _)| idx)
-                        .collect();
-
-                    let pre_spike_times: Vec<f64> = incoming_syn_indices
-                        .iter()
-                        .map(|&idx| {
-                            let src = network.synapses[idx].get_source();
-                            network.neurons[src].last_spike_time
-                        })
-                        .collect();
-
-                    // --- 2. Mutably borrow target neuron and process spike ---
-                    let target_idx = event.target_neuron;
-                    let target = &mut network.neurons[target_idx];
-                    let potential = input_spike_potential * event.weight;
-
-                    if target.receive(potential, current_time) > 0.0 {
-                        let post_spike_time = target.last_spike_time;
-
-                        // --- 3. Update incoming synapse weights (STDP) ---
-                        for (syn_idx, pre_time) in incoming_syn_indices.into_iter().zip(pre_spike_times) {
-                            network.synapses[syn_idx].update_weight(pre_time, post_spike_time);
-                        }
-
-                        // --- 4. Propagate spikes through outgoing synapses ---
-                        let exiting = target.exiting_synapses.clone();
-                        for out_syn_idx in exiting {
-                            let out_syn = &network.synapses[out_syn_idx];
-                            event_queue.push(SpikeEvent {
-                                source_neuron: target_idx,
-                                target_neuron: out_syn.target_neuron,
-                                arrival_time: current_time + SYNAPSE_DELAY,
-                                weight: out_syn.weight,
-                            });
-                        }
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-
-            current_time += time_step;
-        }
-
-        current_time += time_step;
-    }
+    network.simulate(steps_to_simulate, 1.0, &mut input_vector);
 
     // --- 3. Results ---
     println!(
-        "\n--- Final Synapse Weights after {}ms simulation ---",
-        simulation_duration
+        "\n--- Final Synapse Weights after simulation ---",
     );
-    for synapse in &network.synapses {
-        println!(
-            "Synapse ({:_>2} -> {:_>2}): {:.4}",
-            synapse.source_neuron, synapse.target_neuron, synapse.weight
-        );
-    }
-
+    network.print_synapse_weight();
     println!("\n--- Analysis ---");
     println!("Weights should now change both upward and downward depending on precise spike timing.");
 }
