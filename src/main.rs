@@ -84,7 +84,7 @@ const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
-const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-3; // 20 millivolt change
+const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-2; // 20 millivolt change
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
@@ -593,7 +593,6 @@ fn main() {
     const NUM_OUTPUT_NEURONS: usize = 2;
     const NUM_HIDDEN_NEURONS: usize = 3;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS;
-    const SYNAPSE_DELAY: f64 = 1.5; // ms delay for chemical synapse
 
     let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
     let mut synapses = Vec::with_capacity(TOTAL_NEURONS);
@@ -607,8 +606,8 @@ fn main() {
 
     // Connect every input neuron to every output neuron
     let mut synapse_index = 0;
-    for i in 0..TOTAL_NEURONS {
-        for j in 0..TOTAL_NEURONS {
+    for i in NUM_INPUT_NEURONS..TOTAL_NEURONS {
+        for j in NUM_INPUT_NEURONS..TOTAL_NEURONS {
             if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
@@ -618,6 +617,14 @@ fn main() {
 
     for i in 0..NUM_INPUT_NEURONS {
         input_neurons.push(i);
+    }
+    for i in 0..(TOTAL_NEURONS-NUM_OUTPUT_NEURONS) {
+        for j in 0..(TOTAL_NEURONS-NUM_OUTPUT_NEURONS) {
+            if (i == j) {continue};
+            synapses.push(ChemicalSynapse::new(i, j));
+            neurons[i].exiting_synapses.push(synapse_index);
+            synapse_index += 1;
+        }
     }
 
     for i in TOTAL_NEURONS - NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
@@ -645,7 +652,7 @@ fn main() {
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
     let mut rng = rand::rng();
-    let amplitude = 90e-4;
+    let amplitude = 0.05;
     for i in 0..steps_to_simulate {
         // Every 20 steps, present either pattern A or B
         if i % 5 == 0 {
@@ -662,7 +669,7 @@ fn main() {
         }
     }
     input_vector.reverse();
-    let potentials = network.simulate(steps_to_simulate, 0.01, &mut input_vector);
+    let potentials = network.simulate(steps_to_simulate, 0.3, &mut input_vector);
 
     // Export network graph
     network.visualize_graph("network.dot");
