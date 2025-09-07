@@ -57,8 +57,8 @@ threshold from the sum, and at next refractory time send again removing 3 and on
 */
 use rand_distr::num_traits::float::FloatCore;
 
-const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
-const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.999;
+const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.0;
+const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 1.0;
 const ELECTRICAL_SYNAPSE_WEIGHT: f64 =
     (MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT) / 2.0;
 const LONG_TERM_POTENTIATION_TIME_WINDOW: f64 = 20.0;
@@ -66,7 +66,7 @@ const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
 const SYNAPSE_LTD_DECAY: f64 = 10.0;
 
-const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.01;
+const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.5;
 const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
@@ -392,6 +392,9 @@ impl Network {
                     let exiting_synapses = self.neurons[input_neuron_idx].exiting_synapses.clone();
                     for &synapse_idx in &exiting_synapses {
                         let synapse = &self.synapses[synapse_idx];
+                        if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+                            continue;
+                        }
                         self.event_queue.push(SpikeEvent {
                             source_neuron: input_neuron_idx,
                             target_neuron: synapse.target_neuron,
@@ -439,6 +442,9 @@ impl Network {
                         // propagate spikes
                         for out_syn_idx in exiting {
                             let out_syn = &self.synapses[out_syn_idx];
+                            if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+                                continue;
+                            }
                             self.event_queue.push(SpikeEvent {
                                 source_neuron: target_idx,
                                 target_neuron: out_syn.target_neuron,
