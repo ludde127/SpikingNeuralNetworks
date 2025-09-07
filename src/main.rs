@@ -378,7 +378,6 @@ impl Network {
 
                         // --- 3. Update incoming synapse weights (STDP) ---
                         for synapse in incoming_syn_indices {
-                            if (synapse.source_neuron != event.source_neuron) {continue};
                             let presynaptic_firing_time = self.neurons[synapse.source_neuron].last_spike_time;
                             synapse.update_weight(presynaptic_firing_time, post_spike_time);
                         }
