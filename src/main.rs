@@ -416,7 +416,6 @@ impl Network {
                 if self.event_queue[i].arrival_time <= self.current_time {
                     spike_event_counter += 1;
                     let event = self.event_queue.remove(i);
-                    // --- 2. Mutably borrow target neuron and process spike ---
                     let target_idx = event.target_neuron;
 
                     let incoming_syn_indices: Vec<usize> = self
@@ -442,24 +441,6 @@ impl Network {
                         // --- POST neuron spiked now ---
                         target_last_spike_time = self.current_time;
 
-                        // LTP: update all incoming synapses
-                        for &syn_idx in &incoming_syn_indices {
-                            let source_idx = self.synapses[syn_idx].source_neuron;
-                            let neuron = &self.neurons[source_idx];
-                            let pre_time = if neuron.last_spike_time == self.current_time
-                                && source_idx == event.source_neuron
-                            {
-                                event.spike_time
-                            } else {
-                                neuron.last_spike_time
-                            };
-
-                            if pre_time.is_finite() {
-                                self.synapses[syn_idx]
-                                    .update_weight(pre_time, target_last_spike_time);
-                            }
-                        }
-
                         // propagate spikes
                         for out_syn_idx in exiting {
                             let out_syn = &self.synapses[out_syn_idx];
@@ -472,26 +453,21 @@ impl Network {
                                 synapse_index: out_syn_idx,
                             });
                         }
-                    } else {
-                        // --- POST did NOT spike ---
-                        // LTD: update *this* synapse against last post spike
-                        // We should do this for all synapses connected to this target neuron
+                    }
+                    for &syn_idx in &incoming_syn_indices {
+                        let source_idx = self.synapses[syn_idx].source_neuron;
+                        let neuron = &self.neurons[source_idx];
+                        let pre_time = if neuron.last_spike_time == self.current_time
+                            && source_idx == event.source_neuron
+                        {
+                            event.spike_time
+                        } else {
+                            neuron.last_spike_time
+                        };
 
-                        for &syn_idx in &incoming_syn_indices {
-                            let source_idx = self.synapses[syn_idx].source_neuron;
-                            let neuron = &self.neurons[source_idx];
-                            let pre_time = if neuron.last_spike_time == self.current_time
-                                && source_idx == event.source_neuron
-                            {
-                                event.spike_time
-                            } else {
-                                neuron.last_spike_time
-                            };
-
-                            if pre_time.is_finite() {
-                                self.synapses[syn_idx]
-                                    .update_weight(pre_time, target_last_spike_time);
-                            }
+                        if pre_time.is_finite() {
+                            self.synapses[syn_idx]
+                                .update_weight(pre_time, target_last_spike_time);
                         }
                     }
                 } else {
