@@ -84,7 +84,7 @@ const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
 const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
 
 const SYNAPSE_SPIKE_TIME: f64 = 2.0;
-const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-2; // 20 millivolt change
+const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2e-3; // 20 millivolt change
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
@@ -589,9 +589,9 @@ fn main() {
     println!("--- Starting Neuromorphic Network Test ---");
 
     // --- 1. Network Setup ---
-    const NUM_INPUT_NEURONS: usize = 4;
-    const NUM_OUTPUT_NEURONS: usize = 2;
-    const NUM_HIDDEN_NEURONS: usize = 3;
+    const NUM_INPUT_NEURONS: usize = 2;
+    const NUM_OUTPUT_NEURONS: usize = 1;
+    const NUM_HIDDEN_NEURONS: usize = 10;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS;
 
     let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
@@ -606,8 +606,8 @@ fn main() {
 
     // Connect every input neuron to every output neuron
     let mut synapse_index = 0;
-    for i in NUM_INPUT_NEURONS..TOTAL_NEURONS {
-        for j in NUM_INPUT_NEURONS..TOTAL_NEURONS {
+    for i in 0..TOTAL_NEURONS {
+        for j in 0..TOTAL_NEURONS {
             if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
@@ -617,14 +617,6 @@ fn main() {
 
     for i in 0..NUM_INPUT_NEURONS {
         input_neurons.push(i);
-    }
-    for i in 0..(TOTAL_NEURONS-NUM_OUTPUT_NEURONS) {
-        for j in 0..(TOTAL_NEURONS-NUM_OUTPUT_NEURONS) {
-            if (i == j) {continue};
-            synapses.push(ChemicalSynapse::new(i, j));
-            neurons[i].exiting_synapses.push(synapse_index);
-            synapse_index += 1;
-        }
     }
 
     for i in TOTAL_NEURONS - NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
@@ -640,14 +632,7 @@ fn main() {
         network.synapses.len()
     );
 
-    // --- 2. Simulation ---
-    let target_pattern = vec![0, 2]; // neurons that fire together
-    println!(
-        "\nTraining network to recognize pattern: Input spikes on neurons {:?}",
-        target_pattern
-    );
-
-    let steps_to_simulate = 1000;
+    let steps_to_simulate = 100000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
@@ -655,17 +640,17 @@ fn main() {
     let amplitude = 0.05;
     for i in 0..steps_to_simulate {
         // Every 20 steps, present either pattern A or B
-        if i % 5 == 0 {
+        if i % 50 == 0 {
             if rng.gen_bool(0.5) {
                 // Pattern A: neurons 0 and 2 spike
-                input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
+                input_vector.push(vec![amplitude, 0.0]);
             } else {
                 // Pattern B: neurons 1 and 3 spike
-                input_vector.push(vec![0.0, amplitude, 0.0, amplitude]);
+                input_vector.push(vec![0.0, amplitude]);
             }
         } else {
             // Silence otherwise
-            input_vector.push(vec![0.0, 0.0, 0.0, 0.0]);
+            input_vector.push(vec![0.0, 0.0]);
         }
     }
     input_vector.reverse();
