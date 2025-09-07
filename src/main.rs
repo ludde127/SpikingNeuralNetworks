@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::iter::successors;
 use rand::Rng;
 use rand_distr::{Normal, Distribution};
 /*
@@ -242,6 +243,7 @@ impl Synapse for ChemicalSynapse {
             self.weight -= delta_w;
         } else {
             // This happens if simultaneous firing or if the prespike neuron have never fired
+            println!("delta t {}", delta_t);
             return;
         }
 
@@ -252,6 +254,11 @@ impl Synapse for ChemicalSynapse {
 
         //println!("{}->{}, delta weight {}, delta_t {}", self.source_neuron, self.target_neuron, delta_w, delta_t);
         self.weight = self.weight.clamp(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT);
+
+        println!(
+            "STDP: pre={} post={} Δt={:.2} Δw={:.4} new_w={:.4}",
+            self.source_neuron, self.target_neuron, delta_t, delta_w, self.weight
+        );
     }
 
     /// Constructor for a new chemical synapse with a random initial weight.
@@ -320,6 +327,7 @@ impl Network {
     }
 
     fn simulate(&mut self, steps_to_simulate: usize, step_size_ms: f64, inputs: &mut Vec<Vec<f64>>) {
+        let mut spike_event_counter: usize = 0;
         assert_eq!(steps_to_simulate, inputs.len(), "Steps to simulate and inputs length should be equal");
         let simulation_end = self.current_time + (steps_to_simulate as f64) * step_size_ms;
         while self.current_time < simulation_end {
@@ -356,14 +364,18 @@ impl Network {
             let mut i = 0;
             while i < self.event_queue.len() {
                 if self.event_queue[i].arrival_time <= self.current_time {
+                    spike_event_counter += 1;
                     let event = self.event_queue.remove(i);
                     // --- 2. Mutably borrow target neuron and process spike ---
                     let target_idx = event.target_neuron;
 
-                    let incoming_syn_indices: Vec<_> = self
+                    let incoming_syn_indices: Vec<usize> = self
                         .synapses
-                        .iter_mut()
-                        .filter(|s| s.target_neuron == event.target_neuron)
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, s)| {
+                            if s.target_neuron == event.target_neuron { Some(idx) } else { None }
+                        })
                         .collect();
 
                     let target = &mut self.neurons[target_idx];
@@ -376,10 +388,21 @@ impl Network {
                         let post_spike_time = target.last_spike_time;
 
 
-                        // --- 3. Update incoming synapse weights (STDP) ---
-                        for synapse in incoming_syn_indices {
-                            let presynaptic_firing_time = self.neurons[synapse.source_neuron].last_spike_time;
-                            synapse.update_weight(presynaptic_firing_time, post_spike_time);
+                        // Update incoming synapse weights (STDP) using event.spike_time as presynaptic time
+                        for &syn_idx in &incoming_syn_indices {
+                            let source_idx = self.synapses[syn_idx].source_neuron;
+                            let neuron = &self.neurons[source_idx];
+                            let presynaptic_firing_time = neuron.last_spike_time; // TODO does not correctly handle electrical synapses which are bidirectional
+                            // guard: if presynaptic time is -inf or NaN, skip
+                            if !presynaptic_firing_time.is_finite() {
+                                continue;
+                            }
+                            if presynaptic_firing_time == self.current_time && source_idx == event.source_neuron {
+                                // Assume that it spike at the spike time of the event.
+                                self.synapses[syn_idx].update_weight(event.spike_time, self.current_time);
+                            } else {
+                                self.synapses[syn_idx].update_weight(presynaptic_firing_time, self.current_time);
+                            }
                         }
 
                         // --- 4. Propagate spikes through outgoing synapses ---
@@ -399,6 +422,7 @@ impl Network {
                 }
             }
         }
+        println!("Finished simulation, handled {} spike events", spike_event_counter);
     }
 }
 
@@ -463,11 +487,11 @@ fn main() {
 
 
 
-    let steps_to_simulate = 5000;
+    let steps_to_simulate = 1000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
-    let amplitude = 50e-3;
+    let amplitude = 25e-3;
     for i in 0..steps_to_simulate {
         if (i % 10 == 0) {
             input_vector.push(vec![amplitude, 0.0, amplitude, 0.0]);
