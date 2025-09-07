@@ -1,7 +1,7 @@
+use rand::Rng;
+use rand_distr::{Distribution, Normal};
 use std::cmp::max;
 use std::iter::successors;
-use rand::Rng;
-use rand_distr::{Normal, Distribution};
 /*
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
@@ -61,13 +61,14 @@ use std::sync::Arc;
 
 const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.001;
 const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.999;
-const ELECTRICAL_SYNAPSE_WEIGHT: f64 = (MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT) / 2.0;
+const ELECTRICAL_SYNAPSE_WEIGHT: f64 =
+    (MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT) / 2.0;
 const LONG_TERM_POTENTIATION_TIME_WINDOW: f64 = 20.0;
 const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
 const SYNAPSE_LTP_DECAY: f64 = 10.0;
 const SYNAPSE_LTD_DECAY: f64 = 10.0;
 
-const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.5;
+const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.005;
 const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
 const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
 
@@ -114,16 +115,21 @@ impl Neuron {
         let time_dist = Normal::new(0.0, 0.05).unwrap();
 
         Neuron {
-            resting_potential: MEAN_NEURON_RESTING_POTENTIAL * (1.0 + potential_dist.sample(&mut rng)),
+            resting_potential: MEAN_NEURON_RESTING_POTENTIAL
+                * (1.0 + potential_dist.sample(&mut rng)),
             membrane_potential: MEAN_NEURON_RESTING_POTENTIAL, // Start at rest
             threshold: MEAN_NEURON_THRESHOLD * (1.0 + potential_dist.sample(&mut rng)),
-            membrane_time_constant: MEAN_NEURON_MEMBRANE_TIME_CONSTANT * (1.0 + time_dist.sample(&mut rng)),
+            membrane_time_constant: MEAN_NEURON_MEMBRANE_TIME_CONSTANT
+                * (1.0 + time_dist.sample(&mut rng)),
             last_spike_time: -1.0, // Initialize to never have spiked
-            absolute_refractory_time: MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME * (1.0 + time_dist.sample(&mut rng)),
+            absolute_refractory_time: MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME
+                * (1.0 + time_dist.sample(&mut rng)),
             exiting_synapses: Vec::new(),
             relative_refractory_duration: 5.0, // Example value
-            hyperpolarization_depth: MEAN_HYPERPOLARIZATION_DEPTH * (1.0 + potential_dist.sample(&mut rng)),
-            hyperpolarization_time_constant: MEAN_HYPERPOLARIZATION_TIME_CONSTANT * (1.0 + time_dist.sample(&mut rng)),
+            hyperpolarization_depth: MEAN_HYPERPOLARIZATION_DEPTH
+                * (1.0 + potential_dist.sample(&mut rng)),
+            hyperpolarization_time_constant: MEAN_HYPERPOLARIZATION_TIME_CONSTANT
+                * (1.0 + time_dist.sample(&mut rng)),
             last_accessed_time: current_time,
         }
     }
@@ -140,8 +146,10 @@ impl Neuron {
         // Relative refractory period: threshold is elevated and decays back to normal.
         let time_in_relative_period = time_since_spike - self.absolute_refractory_time;
         if time_in_relative_period < self.relative_refractory_duration {
-            let recovery_factor = (-time_in_relative_period / self.hyperpolarization_time_constant).exp();
-            let elevated_threshold = self.threshold + self.hyperpolarization_depth * recovery_factor;
+            let recovery_factor =
+                (-time_in_relative_period / self.hyperpolarization_time_constant).exp();
+            let elevated_threshold =
+                self.threshold + self.hyperpolarization_depth * recovery_factor;
             return elevated_threshold;
         }
 
@@ -166,7 +174,8 @@ impl Neuron {
         let dt = current_time - self.last_accessed_time;
         // Apply exponential decay to the membrane potential.
         let decay_factor = (-dt / self.membrane_time_constant).exp();
-        self.membrane_potential = self.resting_potential + (self.membrane_potential - self.resting_potential) * decay_factor;
+        self.membrane_potential = self.resting_potential
+            + (self.membrane_potential - self.resting_potential) * decay_factor;
         self.last_accessed_time = current_time;
 
         // Integrate the incoming potential into the membrane potential regardless of the refractory state.
@@ -174,13 +183,14 @@ impl Neuron {
 
         // Check if the neuron is ready to fire. It must be outside the refractory period and
         // its membrane potential must have reached the threshold.
-        if current_time - self.last_spike_time >= self.absolute_refractory_time && self.membrane_potential >= self.current_threshold(current_time) {
+        if current_time - self.last_spike_time >= self.absolute_refractory_time
+            && self.membrane_potential >= self.current_threshold(current_time)
+        {
             // The neuron fires an action potential.
             self.last_spike_time = current_time;
 
             // Reset the membrane potential to its resting state after firing.
             self.membrane_potential = self.resting_potential;
-
 
             // Return a standard action potential value.
             return 1.0;
@@ -252,7 +262,10 @@ impl Synapse for ChemicalSynapse {
         // Clamp the weight to a valid range to prevent it from growing indefinitely
 
         //println!("{}->{}, delta weight {}, delta_t {}", self.source_neuron, self.target_neuron, delta_w, delta_t);
-        self.weight = self.weight.clamp(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT);
+        self.weight = self.weight.clamp(
+            MINIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+            MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+        );
 
         println!(
             "STDP: pre={} post={} Δt={:.2} Δw={:.4} new_w={:.4}",
@@ -263,7 +276,9 @@ impl Synapse for ChemicalSynapse {
     /// Constructor for a new chemical synapse with a random initial weight.
     fn new(source_neuron: usize, target_neuron: usize) -> Self {
         let initial_weight = rand::rng().random_range(0.4..=0.6);
-        let plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR * (WEIGHT_RANGE_END_VALUE - (WEIGHT_NORMALIZATION_FACTOR * initial_weight - WEIGHT_RANGE_END_VALUE).abs());
+        let plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
+            * (WEIGHT_RANGE_END_VALUE
+                - (WEIGHT_NORMALIZATION_FACTOR * initial_weight - WEIGHT_RANGE_END_VALUE).abs());
 
         ChemicalSynapse {
             source_neuron,
@@ -272,8 +287,12 @@ impl Synapse for ChemicalSynapse {
             plasticity,
         }
     }
-    fn get_source(&self) -> usize { self.source_neuron }
-    fn get_target(&self) -> usize { self.target_neuron }
+    fn get_source(&self) -> usize {
+        self.source_neuron
+    }
+    fn get_target(&self) -> usize {
+        self.target_neuron
+    }
 }
 
 impl Synapse for ElectricalSynapse {
@@ -284,13 +303,16 @@ impl Synapse for ElectricalSynapse {
         ElectricalSynapse {
             source_neuron,
             target_neuron,
-            weight: ELECTRICAL_SYNAPSE_WEIGHT
+            weight: ELECTRICAL_SYNAPSE_WEIGHT,
         }
     }
-    fn get_source(&self) -> usize { self.source_neuron }
-    fn get_target(&self) -> usize { self.target_neuron }
+    fn get_source(&self) -> usize {
+        self.source_neuron
+    }
+    fn get_target(&self) -> usize {
+        self.target_neuron
+    }
 }
-
 
 #[derive(Clone, Debug)]
 struct SpikeEvent {
@@ -313,8 +335,20 @@ struct Network {
 }
 
 impl Network {
-    fn new(neurons: Vec<Neuron>, synapses: Vec<ChemicalSynapse>, input_neurons: Vec<usize>, output_neurons: Vec<usize>) -> Self {
-        Network { neurons, synapses, event_queue: Vec::new(), current_time: 0.0, input_neurons, output_neurons }
+    fn new(
+        neurons: Vec<Neuron>,
+        synapses: Vec<ChemicalSynapse>,
+        input_neurons: Vec<usize>,
+        output_neurons: Vec<usize>,
+    ) -> Self {
+        Network {
+            neurons,
+            synapses,
+            event_queue: Vec::new(),
+            current_time: 0.0,
+            input_neurons,
+            output_neurons,
+        }
     }
 
     fn print_synapse_weight(&self) {
@@ -326,9 +360,18 @@ impl Network {
         }
     }
 
-    fn simulate(&mut self, steps_to_simulate: usize, step_size_ms: f64, inputs: &mut Vec<Vec<f64>>) {
+    fn simulate(
+        &mut self,
+        steps_to_simulate: usize,
+        step_size_ms: f64,
+        inputs: &mut Vec<Vec<f64>>,
+    ) {
         let mut spike_event_counter: usize = 0;
-        assert_eq!(steps_to_simulate, inputs.len(), "Steps to simulate and inputs length should be equal");
+        assert_eq!(
+            steps_to_simulate,
+            inputs.len(),
+            "Steps to simulate and inputs length should be equal"
+        );
         let simulation_end = self.current_time + (steps_to_simulate as f64) * step_size_ms;
         while self.current_time < simulation_end {
             self.current_time += step_size_ms;
@@ -336,15 +379,19 @@ impl Network {
             // 1. Present the input pattern
 
             let input = inputs.pop().unwrap();
-            assert_eq!(input.len(), self.input_neurons.len(), "Inputs at each timestep must have values for all neurons");
+            assert_eq!(
+                input.len(),
+                self.input_neurons.len(),
+                "Inputs at each timestep must have values for all neurons"
+            );
 
             for (input_neuron_idx, value) in input.iter().enumerate() {
-                let spike = self.neurons[input_neuron_idx].receive(value.clone(), self.current_time);
+                let spike =
+                    self.neurons[input_neuron_idx].receive(value.clone(), self.current_time);
                 if (spike > 0.0) {
                     //println!("Input Neuron {} spiked", input_neuron_idx);
                     // The neuron spiked so we must propagate it
-                    let exiting_synapses =
-                        self.neurons[input_neuron_idx].exiting_synapses.clone();
+                    let exiting_synapses = self.neurons[input_neuron_idx].exiting_synapses.clone();
                     for &synapse_idx in &exiting_synapses {
                         let synapse = &self.synapses[synapse_idx];
                         self.event_queue.push(SpikeEvent {
@@ -358,7 +405,6 @@ impl Network {
                     }
                     self.neurons[input_neuron_idx].last_spike_time = self.current_time;
                 }
-
             }
 
             // Deliver all spike events scheduled for this timestep
@@ -375,19 +421,43 @@ impl Network {
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, s)| {
-                            if s.target_neuron == event.target_neuron { Some(idx) } else { None }
+                            if s.target_neuron == event.target_neuron {
+                                Some(idx)
+                            } else {
+                                None
+                            }
                         })
                         .collect();
 
                     let target = &mut self.neurons[target_idx];
                     let mut target_last_spike_time = target.last_spike_time;
-                    let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;  // All have the same potential in this simplification
+                    let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
                     let action_potential = target.receive(potential, self.current_time);
                     let exiting = target.exiting_synapses.clone();
 
-                    if  action_potential > 0.0 {
+                    if action_potential > 0.0 {
+                        // --- POST neuron spiked now ---
                         target_last_spike_time = self.current_time;
-                        // --- 4. Propagate spikes through outgoing synapses ---
+
+                        // LTP: update all incoming synapses
+                        for &syn_idx in &incoming_syn_indices {
+                            let source_idx = self.synapses[syn_idx].source_neuron;
+                            let neuron = &self.neurons[source_idx];
+                            let pre_time = if neuron.last_spike_time == self.current_time
+                                && source_idx == event.source_neuron
+                            {
+                                event.spike_time
+                            } else {
+                                neuron.last_spike_time
+                            };
+
+                            if pre_time.is_finite() {
+                                self.synapses[syn_idx]
+                                    .update_weight(pre_time, target_last_spike_time);
+                            }
+                        }
+
+                        // propagate spikes
                         for out_syn_idx in exiting {
                             let out_syn = &self.synapses[out_syn_idx];
                             self.event_queue.push(SpikeEvent {
@@ -399,21 +469,12 @@ impl Network {
                                 synapse_index: out_syn_idx,
                             });
                         }
-                    }
-                    // Update incoming synapse weights (STDP) using event.spike_time as presynaptic time
-                    for &syn_idx in &incoming_syn_indices {
-                        let source_idx = self.synapses[syn_idx].source_neuron;
-                        let neuron = &self.neurons[source_idx];
-                        let presynaptic_firing_time = neuron.last_spike_time; // TODO does not correctly handle electrical synapses which are bidirectional
-                        // guard: if presynaptic time is -inf or NaN, skip
-                        if !presynaptic_firing_time.is_finite() {
-                            continue;
-                        }
-                        if presynaptic_firing_time == self.current_time && source_idx == event.source_neuron && target_last_spike_time == self.current_time {
-                            // Assume that it spike at the spike time of the event.
-                            self.synapses[syn_idx].update_weight(event.spike_time, target_last_spike_time);
-                        } else {
-                            self.synapses[syn_idx].update_weight(presynaptic_firing_time, target_last_spike_time);
+                    } else {
+                        // --- POST did NOT spike ---
+                        // LTD: update *this* synapse against last post spike
+                        if target_last_spike_time.is_finite() {
+                            self.synapses[event.synapse_index]
+                                .update_weight(event.spike_time, target_last_spike_time);
                         }
                     }
                 } else {
@@ -421,7 +482,10 @@ impl Network {
                 }
             }
         }
-        println!("Finished simulation, handled {} spike events", spike_event_counter);
+        println!(
+            "Finished simulation, handled {} spike events",
+            spike_event_counter
+        );
     }
 }
 
@@ -456,17 +520,11 @@ fn main() {
         }
     }
 
-    for i in TOTAL_NEURONS-NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
+    for i in TOTAL_NEURONS - NUM_OUTPUT_NEURONS..TOTAL_NEURONS {
         output_neurons.push(i);
     }
 
-    let mut network = Network::new(
-        neurons,
-        synapses,
-        input_neurons,
-        output_neurons
-    );
-
+    let mut network = Network::new(neurons, synapses, input_neurons, output_neurons);
 
     println!(
         "Network created with {} input neurons, {} output neurons, and {} synapses.",
@@ -484,8 +542,6 @@ fn main() {
         target_pattern
     );
 
-
-
     let steps_to_simulate = 1000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
@@ -502,10 +558,10 @@ fn main() {
     network.simulate(steps_to_simulate, 1.0, &mut input_vector);
 
     // --- 3. Results ---
-    println!(
-        "\n--- Final Synapse Weights after simulation ---",
-    );
+    println!("\n--- Final Synapse Weights after simulation ---",);
     network.print_synapse_weight();
     println!("\n--- Analysis ---");
-    println!("Weights should now change both upward and downward depending on precise spike timing.");
+    println!(
+        "Weights should now change both upward and downward depending on precise spike timing."
+    );
 }
