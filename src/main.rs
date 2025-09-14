@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use plotters::prelude::*;
@@ -332,7 +333,7 @@ struct SpikeEvent {
 struct Network {
     neurons: Vec<Neuron>,
     synapses: Vec<ChemicalSynapse>,
-    event_queue: Vec<SpikeEvent>,
+    event_queue: VecDeque<SpikeEvent>,
     current_time: f64,
     input_neurons: Vec<usize>,
     output_neurons: Vec<usize>,
@@ -348,7 +349,7 @@ impl Network {
         Network {
             neurons,
             synapses,
-            event_queue: Vec::new(),
+            event_queue: VecDeque::new(),
             current_time: 0.0,
             input_neurons,
             output_neurons,
@@ -404,7 +405,7 @@ impl Network {
                         if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                             continue;
                         }
-                        self.event_queue.push(SpikeEvent {
+                        self.event_queue.push_back(SpikeEvent {
                             source_neuron: input_neuron_idx,
                             target_neuron: synapse.target_neuron,
                             spike_time: self.current_time,
@@ -431,10 +432,15 @@ impl Network {
 
     fn process_events(&mut self, spike_event_counter: &mut usize) {
         let mut i = 0;
-        while i < self.event_queue.len() {
-            if self.event_queue[i].arrival_time <= self.current_time {
+        let initial_queue_length = self.event_queue.len();
+        loop {
+            let event = self.event_queue.pop_front();
+            if event.is_none() || i > initial_queue_length {
+                break;
+            }
+            let event = event.unwrap();
+            if event.arrival_time <= self.current_time {
                 *spike_event_counter += 1;
-                let event = self.event_queue.remove(i);
                 let target_idx = event.target_neuron;
 
                 let incoming_syn_indices: Vec<usize> = self
@@ -466,7 +472,7 @@ impl Network {
                         if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                             continue;
                         }
-                        self.event_queue.push(SpikeEvent {
+                        self.event_queue.push_back(SpikeEvent {
                             source_neuron: target_idx,
                             target_neuron: out_syn.target_neuron,
                             spike_time: self.current_time,
@@ -493,6 +499,7 @@ impl Network {
                     }
                 }
             } else {
+                self.event_queue.push_back(event);
                 i += 1;
             }
         }
