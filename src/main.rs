@@ -262,13 +262,6 @@ impl Synapse for ChemicalSynapse {
             return;
         }
         self.weight += delta_w;
-
-        self.plasticity = ADAPTIVE_LEARNING_RATE_SCALING_FACTOR
-            * (WEIGHT_RANGE_END_VALUE
-                - (WEIGHT_NORMALIZATION_FACTOR * self.weight - WEIGHT_RANGE_END_VALUE).abs());
-        // Clamp the weight to a valid range to prevent it from growing indefinitely
-
-        //println!("{}->{}, delta weight {}, delta_t {}", self.source_neuron, self.target_neuron, delta_w, delta_t);
         self.weight = self.weight.clamp(
             MINIMUM_CHEMICAL_SYNAPSE_WEIGHT,
             MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
@@ -339,6 +332,65 @@ struct Network {
     current_time: f64,
     input_neurons: Vec<usize>,
     output_neurons: Vec<usize>,
+}
+
+impl Network {
+    pub(crate) fn describe(&self) {
+        println!(
+            "Network created with {} input neurons, {} output neurons, {} hidden neurons, and {} synapses.",
+            self.input_neurons.len(),
+            self.output_neurons.len(),
+            self.neurons.len() - self.input_neurons.len() - self.output_neurons.len(),
+            self.synapses.len()
+        );
+
+        let total_weight: f64 = self.synapses.iter().map(|s| s.weight).sum();
+        let avg_weight = total_weight / self.synapses.len() as f64;
+        let max_weight = self.synapses.iter().map(|s| s.weight).fold(
+            MINIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+            |a, b| a.max(b),
+        );
+        let min_weight = self.synapses.iter().map(|s| s.weight).fold(
+            MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+            |a, b| a.min(b),
+        );
+        println!(
+            "Synapse weights - Avg: {:.4}, Min: {:.4}, Max: {:.4}",
+            avg_weight, min_weight, max_weight
+        );
+        let total_plasticity: f64 = self.synapses.iter().map(|s| s.plasticity).sum();
+        let avg_plasticity = total_plasticity / self.synapses.len() as f64;
+        let max_plasticity = self.synapses.iter().map(|s| s.plasticity).fold(
+            0.0,
+            |a, b| a.max(b),
+        );
+        let min_plasticity = self.synapses.iter().map(|s| s.plasticity).fold(
+            f64::INFINITY,
+            |a, b| a.min(b),
+        );
+        println!(
+            "Synapse plasticity - Avg: {:.4}, Min: {:.4}, Max: {:.4}",
+            avg_plasticity, min_plasticity, max_plasticity
+        );
+
+
+        // Num synapses with weight equal to minimum
+        let num_min_weight = self
+            .synapses
+            .iter()
+            .filter(|s| (s.weight - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT).abs() < f64::EPSILON)
+            .count();
+        let num_max_weight = self
+            .synapses
+            .iter()
+            .filter(|s| (s.weight - MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT).abs() < f64::EPSILON)
+            .count();
+        println!(
+            "Synapses at weight bounds - Min weight: {}, Max weight: {}",
+            num_min_weight, num_max_weight
+        );
+        println!("---");
+    }
 }
 
 impl Network {
@@ -627,15 +679,7 @@ fn main() {
     }
 
     let mut network = Network::new(neurons, synapses, input_neurons, output_neurons);
-
-    println!(
-        "Network created with {} input neurons, {} output neurons, {} hidden neurons, and {} synapses.",
-        NUM_INPUT_NEURONS,
-        NUM_OUTPUT_NEURONS,
-        NUM_HIDDEN_NEURONS,
-        network.synapses.len()
-    );
-
+    network.describe();
 
     let steps_to_simulate = 1000;
 
@@ -668,9 +712,10 @@ fn main() {
     println!("--- Simulation completed in {:.2?} ---", start.elapsed());
 
     // Export network graph
-    network.visualize_graph("network.dot");
+    //network.visualize_graph("network.dot");
 
     // Plot membrane potentials
     network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
+    network.describe();
 
 }
