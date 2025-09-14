@@ -399,8 +399,8 @@ impl Network {
                 if (spike > 0.0) {
                     //println!("Input Neuron {} spiked", input_neuron_idx);
                     // The neuron spiked so we must propagate it
-                    let exiting_synapses = self.neurons[input_neuron_idx].exiting_synapses.clone();
-                    for &synapse_idx in &exiting_synapses {
+                    let exiting_synapses = &self.neurons[input_neuron_idx].exiting_synapses;
+                    for &synapse_idx in exiting_synapses {
                         let synapse = &self.synapses[synapse_idx];
                         if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                             continue;
@@ -668,8 +668,8 @@ fn main() {
     let start = Instant::now();
     let potentials = network.simulate(steps_to_simulate, 0.3, &mut input_vector);
     // --- 3. Results ---
-    println!("\n--- Final Synapse Weights after simulation ---",);
-    network.print_synapse_weight();
+    //println!("\n--- Final Synapse Weights after simulation ---",);
+    //network.print_synapse_weight();
     println!("--- Simulation completed in {:.2?} ---", start.elapsed());
 
     // Export network graph
