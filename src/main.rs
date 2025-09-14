@@ -433,9 +433,9 @@ impl Network {
     fn process_events(&mut self, spike_event_counter: &mut usize) {
         let mut i = 0;
         let initial_queue_length = self.event_queue.len();
-        loop {
+        while i < initial_queue_length {
             let event = self.event_queue.pop_front();
-            if event.is_none() || i > initial_queue_length {
+            if event.is_none() {
                 break;
             }
             let event = event.unwrap();
@@ -448,7 +448,7 @@ impl Network {
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, s)| {
-                        if s.target_neuron == event.target_neuron {
+                        if s.target_neuron == event.target_neuron && s.weight > MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                             Some(idx)
                         } else {
                             None
@@ -460,7 +460,7 @@ impl Network {
                 let mut target_last_spike_time = target.last_spike_time;
                 let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
                 let action_potential = target.receive(potential, self.current_time);
-                let exiting = target.exiting_synapses.clone();
+                let exiting = &target.exiting_synapses;
 
                 if action_potential > 0.0 {
                     // --- POST neuron spiked now ---
@@ -468,7 +468,7 @@ impl Network {
 
                     // propagate spikes
                     for out_syn_idx in exiting {
-                        let out_syn = &self.synapses[out_syn_idx];
+                        let out_syn = &self.synapses[*out_syn_idx];
                         if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                             continue;
                         }
@@ -478,7 +478,7 @@ impl Network {
                             spike_time: self.current_time,
                             arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
                             weight: out_syn.weight,
-                            synapse_index: out_syn_idx,
+                            synapse_index: *out_syn_idx,
                         });
                     }
                 }
