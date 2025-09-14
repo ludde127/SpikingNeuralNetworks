@@ -102,6 +102,7 @@ struct Neuron {
     last_spike_time: f64, // in ms
     absolute_refractory_time: f64,
     exiting_synapses: Vec<usize>, // Indexes of the synapses in the main synapse array (these are the outgoing, may however be bidirectional)
+    entering_synapses: Vec<usize>, // Indexes of the synapses in the main synapse array (these are the incoming, may however be bidirectional)
 
     relative_refractory_duration: f64, // Time it is hyperpolarized after spiking but not fully blocked
     hyperpolarization_depth: f64, // The most negative voltage reached over the membrane after an action potential, around -75 to -80 mV
@@ -129,6 +130,7 @@ impl Neuron {
             last_spike_time: -1.0, // Initialize to never have spiked
             absolute_refractory_time: MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME
                 * (1.0 + time_dist.sample(&mut rng)),
+            entering_synapses: Vec::new(),
             exiting_synapses: Vec::new(),
             relative_refractory_duration: 5.0, // Example value
             hyperpolarization_depth: MEAN_HYPERPOLARIZATION_DEPTH
@@ -245,7 +247,7 @@ impl Synapse for ChemicalSynapse {
     /// `learning_rate` determines the magnitude of the weight change.
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64) {
         let mut delta_t = post_spike_time - pre_spike_time;
-        let mut delta_w = 0.0;
+        let delta_w;
         // Long-Term Potentiation (LTP): Pre-synaptic spike before post-synaptic spike
         if delta_t > 0.0 {
             delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp(); // Exponential decay
@@ -443,19 +445,6 @@ impl Network {
                 *spike_event_counter += 1;
                 let target_idx = event.target_neuron;
 
-                let incoming_syn_indices: Vec<usize> = self
-                    .synapses
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, s)| {
-                        if s.target_neuron == event.target_neuron && s.weight > MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
-                            Some(idx)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
                 let target = &mut self.neurons[target_idx];
                 let mut target_last_spike_time = target.last_spike_time;
                 let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
@@ -482,8 +471,14 @@ impl Network {
                         });
                     }
                 }
-                for &syn_idx in &incoming_syn_indices {
-                    let source_idx = self.synapses[syn_idx].source_neuron;
+                for syn_idx in target.entering_synapses.clone() {
+                    let synapse = &mut self.synapses[syn_idx];
+
+                    if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+                        continue;
+                    }
+
+                    let source_idx = synapse.source_neuron;
                     let neuron = &self.neurons[source_idx];
                     let pre_time = if neuron.last_spike_time == self.current_time
                         && source_idx == event.source_neuron
@@ -494,8 +489,7 @@ impl Network {
                     };
 
                     if pre_time.is_finite() {
-                        self.synapses[syn_idx]
-                            .update_weight(pre_time, target_last_spike_time);
+                        synapse.update_weight(pre_time, target_last_spike_time);
                     }
                 }
             } else {
@@ -619,6 +613,7 @@ fn main() {
             if (i == j) {continue};
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
+            neurons[j].entering_synapses.push(synapse_index);
             synapse_index += 1;
         }
     }
