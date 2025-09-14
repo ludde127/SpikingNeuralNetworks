@@ -5,6 +5,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::dot::{Dot, Config};
 use std::fs::File;
 use std::io::Write;
+use std::time::Instant;
 /*
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
@@ -591,7 +592,7 @@ fn main() {
     // --- 1. Network Setup ---
     const NUM_INPUT_NEURONS: usize = 2;
     const NUM_OUTPUT_NEURONS: usize = 1;
-    const NUM_HIDDEN_NEURONS: usize = 10;
+    const NUM_HIDDEN_NEURONS: usize = 50;
     const TOTAL_NEURONS: usize = NUM_INPUT_NEURONS + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS;
 
     let mut neurons = Vec::with_capacity(TOTAL_NEURONS);
@@ -626,13 +627,15 @@ fn main() {
     let mut network = Network::new(neurons, synapses, input_neurons, output_neurons);
 
     println!(
-        "Network created with {} input neurons, {} output neurons, and {} synapses.",
+        "Network created with {} input neurons, {} output neurons, {} hidden neurons, and {} synapses.",
         NUM_INPUT_NEURONS,
         NUM_OUTPUT_NEURONS,
+        NUM_HIDDEN_NEURONS,
         network.synapses.len()
     );
 
-    let steps_to_simulate = 100;
+
+    let steps_to_simulate = 1000;
 
     let mut input_vector = Vec::with_capacity(steps_to_simulate);
 
@@ -654,7 +657,13 @@ fn main() {
         }
     }
     input_vector.reverse();
+
+    let start = Instant::now();
     let potentials = network.simulate(steps_to_simulate, 0.3, &mut input_vector);
+    // --- 3. Results ---
+    println!("\n--- Final Synapse Weights after simulation ---",);
+    network.print_synapse_weight();
+    println!("--- Simulation completed in {:.2?} ---", start.elapsed());
 
     // Export network graph
     network.visualize_graph("network.dot");
@@ -662,7 +671,4 @@ fn main() {
     // Plot membrane potentials
     network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
 
-    // --- 3. Results ---
-    println!("\n--- Final Synapse Weights after simulation ---",);
-    network.print_synapse_weight();
 }
