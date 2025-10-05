@@ -4,6 +4,7 @@ use crate::spike_event::SpikeEvent;
 use crate::synapse::{ChemicalSynapse, Synapse};
 use indicatif::ProgressBar;
 use std::collections::VecDeque;
+use rayon::prelude::*;
 
 /// A simple struct to hold the network components.
 pub struct Network {
@@ -247,10 +248,16 @@ impl Network {
         &mut self,
         steps_to_simulate: usize,
         step_size_ms: f64,
-        inputs: &mut Vec<Vec<f64>>,
+        inputs: &Vec<Vec<f64>>,
         target_label: Option<usize>,
+        show_progress: bool,
+        track_potentials: bool,
     ) -> Vec<Vec<f64>> {
-        let mut potentials: Vec<Vec<f64>> = Vec::new();
+        let mut potentials: Vec<Vec<f64>> = if track_potentials {
+            Vec::with_capacity(steps_to_simulate)
+        } else {
+            Vec::new()
+        };
         let mut spike_event_counter: usize = 0;
 
         assert_eq!(
@@ -260,16 +267,23 @@ impl Network {
         );
 
         let simulation_end = self.current_time + (steps_to_simulate as f64) * step_size_ms;
-        let pbar = ProgressBar::new(steps_to_simulate as u64);
+        let pbar = if show_progress {
+            Some(ProgressBar::new(steps_to_simulate as u64))
+        } else {
+            None
+        };
 
         // Track output neuron spikes for reward/punishment
         let mut output_spike_counts = vec![0; self.output_neurons.len()];
 
+        let mut step_idx = 0;
         while self.current_time + step_size_ms < simulation_end {
             self.current_time += step_size_ms;
 
-            // 1. Present the input pattern
-            let input = inputs.pop().unwrap();
+            // 1. Present the input pattern - use indexing instead of popping
+            let input = &inputs[step_idx];
+            step_idx += 1;
+
             assert_eq!(
                 input.len(),
                 self.input_neurons.len(),
@@ -278,7 +292,7 @@ impl Network {
 
             for (input_neuron_idx, value) in input.iter().enumerate() {
                 let spike =
-                    self.neurons[input_neuron_idx].receive(value.clone(), self.current_time);
+                    self.neurons[input_neuron_idx].receive(*value, self.current_time);
                 if spike > 0.0 {
                     let exiting_synapses = &self.neurons[input_neuron_idx].exiting_synapses;
                     for &synapse_idx in exiting_synapses {
@@ -300,11 +314,16 @@ impl Network {
             }
 
             // Deliver all spike events scheduled for this timestep
-            self.process_events_supervised(&mut spike_event_counter, &mut output_spike_counts, target_label);
+            self.process_events_supervised(&mut spike_event_counter, &mut output_spike_counts);
 
-            let snapshot: Vec<f64> = self.neurons.iter().map(|n| n.membrane_potential).collect();
-            potentials.push(snapshot);
-            pbar.inc(1);
+            if track_potentials {
+                let snapshot: Vec<f64> = self.neurons.iter().map(|n| n.membrane_potential).collect();
+                potentials.push(snapshot);
+            }
+
+            if let Some(ref pb) = pbar {
+                pb.inc(1);
+            }
         }
 
         // Apply reward or punishment at the end of the simulation
@@ -312,10 +331,12 @@ impl Network {
             self.apply_supervision(correct_label, &output_spike_counts);
         }
 
-        println!(
-            "Finished simulation, handled {} spike events",
-            spike_event_counter
-        );
+        if show_progress {
+            println!(
+                "Finished simulation, handled {} spike events",
+                spike_event_counter
+            );
+        }
         potentials
     }
 
@@ -323,8 +344,16 @@ impl Network {
         &mut self,
         spike_event_counter: &mut usize,
         output_spike_counts: &mut Vec<usize>,
-        target_label: Option<usize>,
     ) {
+        // Pre-create a lookup map for faster output neuron checking
+        let output_neuron_indices: Vec<bool> = {
+            let mut indices = vec![false; self.neurons.len()];
+            for &neuron_id in self.output_neurons.iter() {
+                indices[neuron_id] = true;
+            }
+            indices
+        };
+
         while let Some(event) = self.event_queue.front() {
             if event.arrival_time > self.current_time {
                 break;
@@ -332,23 +361,30 @@ impl Network {
             let event = self.event_queue.pop_front().unwrap();
             *spike_event_counter += 1;
             let target_idx = event.target_neuron;
+
+            // Extract entering_synapses before borrowing target mutably
+            let entering_synapses = self.neurons[target_idx].entering_synapses.clone();
+
             let target = &mut self.neurons[target_idx];
             let mut target_last_spike_time = target.last_spike_time;
             let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;
             let action_potential = target.receive(potential, self.current_time);
-            let exiting = &target.exiting_synapses;
+            let exiting = target.exiting_synapses.clone();
 
             if action_potential > 0.0 {
                 target_last_spike_time = self.current_time;
 
-                // Track output neuron spikes
-                for (idx, &output_neuron_id) in self.output_neurons.iter().enumerate() {
-                    if target_idx == output_neuron_id {
-                        output_spike_counts[idx] += 1;
+                // Track output neuron spikes - optimized with lookup
+                if output_neuron_indices[target_idx] {
+                    for (idx, &output_neuron_id) in self.output_neurons.iter().enumerate() {
+                        if target_idx == output_neuron_id {
+                            output_spike_counts[idx] += 1;
+                            break;
+                        }
                     }
                 }
 
-                for out_syn_idx in exiting {
+                for out_syn_idx in &exiting {
                     let out_syn = &self.synapses[*out_syn_idx];
                     if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                         continue;
@@ -364,8 +400,10 @@ impl Network {
                 }
             }
 
-            // Standard STDP update (no modulation during forward pass)
-            for syn_idx in target.entering_synapses.clone() {
+            // Mutable borrow of target ends here automatically
+
+            // Standard STDP update
+            for &syn_idx in &entering_synapses {
                 let synapse = &mut self.synapses[syn_idx];
                 if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                     continue;

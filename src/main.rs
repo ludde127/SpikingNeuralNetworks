@@ -10,6 +10,7 @@ use rand::Rng;
 use std::time::Instant;
 use std::fs;
 use std::path::Path;
+use rayon::prelude::*;
 
 use crate::neuron::Neuron;
 use crate::network::Network;
@@ -61,6 +62,16 @@ fn iris_classification_test() {
     println!("Loaded {} setosa images and {} versicolour images",
              class1_images.len(), class2_images.len());
 
+    // Balance the dataset - ensure equal samples of each class
+    let min_samples = class1_images.len().min(class2_images.len());
+    println!("Balancing dataset to {} samples per class...", min_samples);
+
+    class1_images.truncate(min_samples);
+    class2_images.truncate(min_samples);
+
+    println!("After balancing: {} setosa images and {} versicolour images",
+             class1_images.len(), class2_images.len());
+
     // Combine and shuffle the dataset
     let mut all_images = Vec::new();
     all_images.extend(class1_images);
@@ -83,7 +94,7 @@ fn iris_classification_test() {
 
     // --- 2. Network Setup with Reward and Pain Neurons ---
     const NUM_OUTPUT_NEURONS: usize = 2; // Two output neurons for binary classification
-    const NUM_HIDDEN_NEURONS: usize = 100;
+    const NUM_HIDDEN_NEURONS: usize = 15;
     const NUM_REWARD_NEURONS: usize = 2; // One reward neuron per class
     const NUM_PAIN_NEURONS: usize = 2;   // One pain neuron per class
 
@@ -166,70 +177,152 @@ fn iris_classification_test() {
     network.describe();
 
     // --- 3. Training Loop with Supervised Learning ---
-    let steps_per_image = 50; // Simulation steps per image
+    let steps_per_image = 30; // Reduced from 50 for faster training
 
     println!("\n--- Training Phase (Supervised with Reward/Pain) ---");
     let training_start = Instant::now();
 
-    for (epoch, (img, label)) in training_set.iter().enumerate() {
-        if epoch % 10 == 0 {
-            println!("Processing training image {}/{} (label: {})", epoch + 1, training_set.len(), label);
-        }
+    // Pre-convert all training images to input vectors to avoid repeated computation
+    println!("Pre-processing training images...");
+    let training_inputs: Vec<(Vec<Vec<f64>>, usize)> = training_set
+        .par_iter()
+        .map(|(img, label)| {
+            let input_vector: Vec<Vec<f64>> = (0..steps_per_image)
+                .map(|_| {
+                    img.pixels()
+                        .map(|pixel| {
+                            let intensity = pixel[0] as f64 / 255.0;
+                            intensity * 0.1 // Scale factor for input current
+                        })
+                        .collect()
+                })
+                .collect();
+            (input_vector, *label)
+        })
+        .collect();
 
-        // Convert image to rate coding: pixel intensity = firing rate
-        let mut input_vector = Vec::with_capacity(steps_per_image);
-        for _ in 0..steps_per_image {
-            let mut step_input = Vec::with_capacity(num_input_neurons);
-            for pixel in img.pixels() {
-                let intensity = pixel[0] as f64 / 255.0;
-                // Rate coding: higher intensity = stronger input current
-                step_input.push(intensity * 0.1); // Scale factor for input current
-            }
-            input_vector.push(step_input);
-        }
+    println!("Training on {} images...", training_inputs.len());
 
+    let train_pb = indicatif::ProgressBar::new(training_inputs.len() as u64);
+    train_pb.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} Loss: {msg}")
+            .unwrap()
+            .progress_chars("##-")
+    );
+
+    let mut running_loss = 0.0;
+    let mut correct_count = 0;
+    let loss_print_interval = 10; // Print loss every 10 images
+
+    for (epoch, (input_vector, label)) in training_inputs.iter().enumerate() {
         // Simulate with supervised learning signal
         let _potentials = network.simulate_supervised(
             steps_per_image,
             0.3,
-            &mut input_vector,
+            input_vector,
             Some(*label), // Provide the correct label
+            false, // Don't show progress bar for each image
+            false, // Don't track potentials during training
         );
+
+        // Calculate loss: we'll use a simple 0-1 loss (1 for incorrect, 0 for correct)
+        // To determine if correct, we need to check the output neuron spike counts
+        // For simplicity during training, we'll estimate based on the supervision applied
+        // A better approach is to actually track the prediction
+
+        // Quick prediction check by running a forward pass
+        let potentials = network.simulate_supervised(
+            steps_per_image,
+            0.3,
+            input_vector,
+            None, // No supervision for prediction check
+            false,
+            true, // Track potentials to make prediction
+        );
+
+        // Check which output neuron had more spikes
+        let mut output_spike_counts = vec![0; 2];
+        for potential_snapshot in &potentials {
+            if potential_snapshot[output_start] > 30.0 {
+                output_spike_counts[0] += 1;
+            }
+            if potential_snapshot[output_start + 1] > 30.0 {
+                output_spike_counts[1] += 1;
+            }
+        }
+
+        let predicted_label = if output_spike_counts[0] > output_spike_counts[1] { 0 } else { 1 };
+        let is_correct = predicted_label == *label;
+
+        if is_correct {
+            correct_count += 1;
+            running_loss += 0.0; // No loss for correct predictions
+        } else {
+            running_loss += 1.0; // Loss of 1 for incorrect predictions
+        }
+
+        // Print loss every N images
+        if (epoch + 1) % loss_print_interval == 0 {
+            let avg_loss = running_loss / loss_print_interval as f64;
+            let accuracy = (correct_count as f64 / loss_print_interval as f64) * 100.0;
+            train_pb.set_message(format!("{:.3} (Acc: {:.1}%)", avg_loss, accuracy));
+            running_loss = 0.0;
+            correct_count = 0;
+        }
+
+        train_pb.inc(1);
     }
+    train_pb.finish_with_message("Training complete");
 
     println!("Training completed in {:.2?}", training_start.elapsed());
     network.describe();
 
     // --- 4. Testing Phase ---
     println!("\n--- Testing Phase ---");
+
+    // Pre-convert all test images to input vectors
+    println!("Pre-processing test images...");
+    let test_inputs: Vec<(Vec<Vec<f64>>, usize)> = test_set
+        .par_iter()
+        .map(|(img, label)| {
+            let input_vector: Vec<Vec<f64>> = (0..steps_per_image)
+                .map(|_| {
+                    img.pixels()
+                        .map(|pixel| {
+                            let intensity = pixel[0] as f64 / 255.0;
+                            intensity * 0.1
+                        })
+                        .collect()
+                })
+                .collect();
+            (input_vector, *label)
+        })
+        .collect();
+
     let mut correct_predictions = 0;
 
     // Confusion matrix: [true_label][predicted_label]
     // Index 0 = setosa, Index 1 = versicolour
     let mut confusion_matrix = vec![vec![0; 2]; 2];
 
-    for (test_idx, (img, actual_label)) in test_set.iter().enumerate() {
-        if test_idx % 10 == 0 {
-            println!("Processing test image {}/{}", test_idx + 1, test_set.len());
-        }
+    let test_pb = indicatif::ProgressBar::new(test_inputs.len() as u64);
+    test_pb.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("##-")
+    );
 
-        // Convert image to rate coding
-        let mut input_vector = Vec::with_capacity(steps_per_image);
-        for _ in 0..steps_per_image {
-            let mut step_input = Vec::with_capacity(num_input_neurons);
-            for pixel in img.pixels() {
-                let intensity = pixel[0] as f64 / 255.0;
-                step_input.push(intensity * 0.1);
-            }
-            input_vector.push(step_input);
-        }
-
+    for (test_idx, (input_vector, actual_label)) in test_inputs.iter().enumerate() {
         // Simulate without supervision (testing mode)
         let potentials = network.simulate_supervised(
             steps_per_image,
             0.3,
-            &mut input_vector,
+            input_vector,
             None, // No label during testing
+            false, // Don't show progress bar
+            true,  // Track potentials for evaluation
         );
 
         // Determine prediction based on output neuron activity
@@ -256,13 +349,16 @@ fn iris_classification_test() {
         if predicted_label == *actual_label {
             correct_predictions += 1;
         }
-    }
 
-    let accuracy = (correct_predictions as f64 / test_set.len() as f64) * 100.0;
+        test_pb.inc(1);
+    }
+    test_pb.finish_with_message("Testing complete");
+
+    let accuracy = (correct_predictions as f64 / test_inputs.len() as f64) * 100.0;
 
     println!("\n--- Results ---");
     println!("Test Accuracy: {:.2}% ({}/{})",
-             accuracy, correct_predictions, test_set.len());
+             accuracy, correct_predictions, test_inputs.len());
 
     // Display confusion matrix
     println!("\n--- Confusion Matrix ---");

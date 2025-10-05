@@ -12,6 +12,7 @@ dependencies = [
  "plotters",
  "rand",
  "rand_distr",
+ "rayon",
 ]
 
 [[package]]
