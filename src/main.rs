@@ -644,6 +644,55 @@ impl Network {
     }
 }
 
+impl Network {
+    /// Plot a histogram of synapse weights (bucketed barplot).
+    pub fn plot_synapse_weights(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        use plotters::prelude::*;
+        const NUM_BUCKETS: usize = 20;
+        let min_weight = MINIMUM_CHEMICAL_SYNAPSE_WEIGHT;
+        let max_weight = MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT;
+        let bucket_width = (max_weight - min_weight) / NUM_BUCKETS as f64;
+        let mut buckets = vec![0usize; NUM_BUCKETS];
+        for s in &self.synapses {
+            let mut idx = ((s.weight - min_weight) / bucket_width).floor() as usize;
+            if idx >= NUM_BUCKETS { idx = NUM_BUCKETS - 1; }
+            buckets[idx] += 1;
+        }
+        let root = BitMapBackend::new(filename, (1280, 720)).into_drawing_area();
+        root.fill(&WHITE)?;
+        let max_count = *buckets.iter().max().unwrap_or(&1) as u32;
+        let mut chart = ChartBuilder::on(&root)
+            .caption("Synapse Weight Distribution", ("sans-serif", 30))
+            .margin(10)
+            .x_label_area_size(40)
+            .y_label_area_size(60)
+            .build_cartesian_2d(0..NUM_BUCKETS, 0u32..max_count)?;
+        chart.configure_mesh()
+            .x_desc("Weight Bucket")
+            .y_desc("Count")
+            .x_labels(NUM_BUCKETS)
+            .x_label_formatter(&|idx| {
+                let left = min_weight + *idx as f64 * bucket_width;
+                let right = left + bucket_width;
+                format!("{:.2}-{:.2}", left, right)
+            })
+            .draw()?;
+        chart.draw_series(buckets.iter().enumerate().map(|(i, &count)| {
+            let left = i;
+            let right = i + 1;
+            let color = if (min_weight + i as f64 * bucket_width) < 0.33 {
+                BLUE.filled()
+            } else if (min_weight + i as f64 * bucket_width) < 0.66 {
+                GREEN.filled()
+            } else {
+                RED.filled()
+            };
+            Rectangle::new([(left, 0), (right, count as u32)], color)
+        }))?;
+        Ok(())
+    }
+}
+
 fn simple_test() {
     println!("--- Starting Neuromorphic Network Test ---");
 
@@ -807,5 +856,6 @@ fn main() {
     println!("--- Simulation completed in {:.2?} ---", start.elapsed());
 
     network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
+    network.plot_synapse_weights("synapse_weights.png").unwrap();
     network.describe();
 }
