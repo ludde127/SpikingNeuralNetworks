@@ -151,6 +151,7 @@ fn iris_classification_test() {
     }
 
     // 2. Hidden -> Hidden (recurrent connections)
+    /*
     for i in hidden_start..hidden_end {
         for j in hidden_start..hidden_end {
             if i == j { continue; }
@@ -160,6 +161,7 @@ fn iris_classification_test() {
             synapse_index += 1;
         }
     }
+    */
 
     // 3. Hidden -> Output
     for i in hidden_start..hidden_end {
@@ -226,6 +228,12 @@ fn iris_classification_test() {
         pain_neurons,
     );
 
+    // --- Adjust Plasticity Settings ---
+    // Increase the base plasticity and the effect of reward/punishment
+    // This makes the network learn faster and respond more strongly to feedback.
+    network.set_plasticity_settings(0.01, 0.005, 0.0025);
+
+
     println!("\n--- Network Architecture ---");
     println!(
         "Input neurons: {} (indices {}-{})",
@@ -286,7 +294,7 @@ fn iris_classification_test() {
                     img.pixels()
                         .map(|pixel| {
                             let intensity = pixel[0] as f64 / 255.0;
-                            intensity * 0.1 // Scale factor for input current
+                            intensity * 0.20 // Scale factor for input current
                         })
                         .collect()
                 })
@@ -298,7 +306,7 @@ fn iris_classification_test() {
     println!("Training on {} images...", training_inputs.len());
 
     // === PARALLEL BATCH TRAINING ===
-    const BATCH_SIZE: usize = 8; // Process 8 images in parallel
+    const BATCH_SIZE: usize = 2; // Process 2 images in parallel
     let num_batches = (training_inputs.len() + BATCH_SIZE - 1) / BATCH_SIZE;
 
     let train_pb = indicatif::ProgressBar::new(num_batches as u64);
@@ -409,7 +417,7 @@ fn iris_classification_test() {
                     img.pixels()
                         .map(|pixel| {
                             let intensity = pixel[0] as f64 / 255.0;
-                            intensity * 0.1
+                            intensity * 0.20
                         })
                         .collect()
                 })

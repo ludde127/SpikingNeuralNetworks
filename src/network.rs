@@ -3,7 +3,6 @@ use crate::neuron::Neuron;
 use crate::spike_event::SpikeEvent;
 use crate::synapse::{ChemicalSynapse, Synapse};
 use indicatif::ProgressBar;
-use rayon::prelude::*;
 use std::collections::VecDeque;
 
 /// A simple struct to hold the network components.
@@ -17,6 +16,8 @@ pub struct Network {
     pub output_neurons: Vec<usize>,
     pub reward_neurons: Vec<usize>,  // Reward neurons for correct classifications
     pub pain_neurons: Vec<usize>,    // Pain neurons for incorrect classifications
+    pub reward_modulation: f64,
+    pub punishment_modulation: f64,
 }
 
 impl Network {
@@ -35,6 +36,8 @@ impl Network {
             output_neurons,
             reward_neurons: Vec::new(),
             pain_neurons: Vec::new(),
+            reward_modulation: 2.0, // Default value
+            punishment_modulation: -2.0, // Default value
         }
     }
 
@@ -55,6 +58,16 @@ impl Network {
             output_neurons,
             reward_neurons,
             pain_neurons,
+            reward_modulation: 2.0, // Default value
+            punishment_modulation: -2.0, // Default value
+        }
+    }
+
+    pub fn set_plasticity_settings(&mut self, base_plasticity: f64, reward_mod: f64, punishment_mod: f64) {
+        self.reward_modulation = reward_mod;
+        self.punishment_modulation = punishment_mod;
+        for synapse in &mut self.synapses {
+            synapse.base_plasticity = base_plasticity;
         }
     }
 
@@ -441,7 +454,7 @@ impl Network {
                     source_neuron.last_spike_time
                 };
                 if pre_time.is_finite() {
-                    synapse.update_weight(pre_time, target_last_spike_time);
+                    synapse.update_weight_dopamine(pre_time, target_last_spike_time);
                 }
             }
         }
@@ -455,70 +468,38 @@ impl Network {
             .enumerate()
             .max_by_key(|(_, &count)| count)
             .map(|(idx, _)| idx)
-            .unwrap_or(0);
+            .unwrap_or(0); // Default to 0 if no spikes
 
-        let correct_output_neuron = self.output_neurons[correct_label];
+        let is_correct = predicted_label == correct_label;
 
-        // === SOFT SUPERVISION: Scale rewards/punishments by spike proportions ===
-
-        // Calculate total spikes across all output neurons
-        let total_spikes: usize = output_spike_counts.iter().sum();
-
-        if total_spikes == 0 {
-            // No output activity - strongly reward the correct output to encourage activity
+        if is_correct {
+            // --- REWARD ---
+            // The network was right. Strengthen the synapses leading to the correct output neuron.
+            let correct_output_neuron = self.output_neurons[correct_label];
             if !self.reward_neurons.is_empty() {
                 let reward_neuron_idx = self.reward_neurons[correct_label];
                 self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
-                self.modulate_synapses_to_neuron(correct_output_neuron, 3.0);
+                self.modulate_synapses_to_neuron(correct_output_neuron, self.reward_modulation);
             }
-            return;
-        }
+        } else {
+            // --- PUNISH & CORRECT ---
+            // The network was wrong. Weaken synapses to the incorrect neuron and strengthen
+            // synapses to the correct one.
 
-        // For each output neuron, apply modulation based on its performance
-        for (output_idx, &spike_count) in output_spike_counts.iter().enumerate() {
-            let output_neuron = self.output_neurons[output_idx];
-            let spike_fraction = spike_count as f64 / total_spikes as f64;
+            // 1. Punish the incorrect path
+            let incorrect_output_neuron = self.output_neurons[predicted_label];
+            if !self.pain_neurons.is_empty() {
+                let pain_neuron_idx = self.pain_neurons[predicted_label];
+                self.neurons[pain_neuron_idx].last_spike_time = self.current_time;
+                self.modulate_synapses_to_neuron(incorrect_output_neuron, self.punishment_modulation);
+            }
 
-            if output_idx == correct_label {
-                // This is the CORRECT output neuron
-                // Reward proportional to how much it spiked
-                // If it spiked 100% of the time: full reward (1.0)
-                // If it spiked 50% of the time: partial reward (0.5)
-                // If it didn't spike: no reward, but also punish to encourage it
-
-                let modulation = if spike_fraction > 0.5 {
-                    // It's already dominant - reinforce it moderately
-                    1.0 + spike_fraction
-                } else if spike_fraction > 0.0 {
-                    // It's spiking but not dominant - strongly encourage it
-                    2.0 + (1.0 - spike_fraction) * 2.0
-                } else {
-                    // It's not spiking at all - very strong encouragement
-                    3.0
-                };
-
-                if !self.reward_neurons.is_empty() {
-                    let reward_neuron_idx = self.reward_neurons[output_idx];
-                    self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
-                    self.modulate_synapses_to_neuron(output_neuron, modulation);
-                }
-
-            } else {
-                // This is an INCORRECT output neuron
-                // Punish proportional to how much it spiked
-                // If it spiked 100% of the time: strong punishment (-2.0)
-                // If it spiked 50% of the time: moderate punishment (-1.0)
-                // If it didn't spike: no punishment needed (already doing the right thing)
-
-                if spike_fraction > 0.0 {
-                    let punishment = -(1.0 + spike_fraction * 2.0);
-
-                    if !self.pain_neurons.is_empty() && output_idx < self.pain_neurons.len() {
-                        let pain_neuron_idx = self.pain_neurons[output_idx];
-                        self.neurons[pain_neuron_idx].last_spike_time = self.current_time;
-                        self.modulate_synapses_to_neuron(output_neuron, punishment);
-                    }
-                }
+            // 2. Reward the correct path to guide the network
+            let correct_output_neuron = self.output_neurons[correct_label];
+            if !self.reward_neurons.is_empty() {
+                let reward_neuron_idx = self.reward_neurons[correct_label];
+                self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
+                self.modulate_synapses_to_neuron(correct_output_neuron, self.reward_modulation * 1.5);
             }
         }
     }
