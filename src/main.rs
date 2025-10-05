@@ -1,19 +1,19 @@
 mod constants;
+mod network;
 mod neuron;
 mod spike_event;
 mod synapse;
-mod network;
 mod visualization;
 
 use image::GrayImage;
 use rand::Rng;
-use std::time::Instant;
+use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
-use rayon::prelude::*;
+use std::time::Instant;
 
-use crate::neuron::Neuron;
 use crate::network::Network;
+use crate::neuron::Neuron;
 use crate::synapse::{ChemicalSynapse, Synapse};
 
 fn load_iris_images(class_path: &str) -> Vec<(GrayImage, usize)> {
@@ -59,8 +59,11 @@ fn iris_classification_test() {
         *label = 1;
     }
 
-    println!("Loaded {} setosa images and {} versicolour images",
-             class1_images.len(), class2_images.len());
+    println!(
+        "Loaded {} setosa images and {} versicolour images",
+        class1_images.len(),
+        class2_images.len()
+    );
 
     // Balance the dataset - ensure equal samples of each class
     let min_samples = class1_images.len().min(class2_images.len());
@@ -69,8 +72,11 @@ fn iris_classification_test() {
     class1_images.truncate(min_samples);
     class2_images.truncate(min_samples);
 
-    println!("After balancing: {} setosa images and {} versicolour images",
-             class1_images.len(), class2_images.len());
+    println!(
+        "After balancing: {} setosa images and {} versicolour images",
+        class1_images.len(),
+        class2_images.len()
+    );
 
     // Combine and shuffle the dataset
     let mut all_images = Vec::new();
@@ -89,18 +95,24 @@ fn iris_classification_test() {
     let training_set = &all_images[..split_idx];
     let test_set = &all_images[split_idx..];
 
-    println!("Training set: {} images, Test set: {} images",
-             training_set.len(), test_set.len());
+    println!(
+        "Training set: {} images, Test set: {} images",
+        training_set.len(),
+        test_set.len()
+    );
 
     // --- 2. Network Setup with Reward and Pain Neurons ---
     const NUM_OUTPUT_NEURONS: usize = 2; // Two output neurons for binary classification
-    const NUM_HIDDEN_NEURONS: usize = 15;
+    const NUM_HIDDEN_NEURONS: usize = 100;
     const NUM_REWARD_NEURONS: usize = 2; // One reward neuron per class
-    const NUM_PAIN_NEURONS: usize = 2;   // One pain neuron per class
+    const NUM_PAIN_NEURONS: usize = 2; // One pain neuron per class
 
     let num_input_neurons: usize = 28 * 28; // 784 pixels
-    let total_neurons: usize = num_input_neurons + NUM_OUTPUT_NEURONS + NUM_HIDDEN_NEURONS
-                               + NUM_REWARD_NEURONS + NUM_PAIN_NEURONS;
+    let total_neurons: usize = num_input_neurons
+        + NUM_OUTPUT_NEURONS
+        + NUM_HIDDEN_NEURONS
+        + NUM_REWARD_NEURONS
+        + NUM_PAIN_NEURONS;
 
     let mut neurons = Vec::with_capacity(total_neurons);
     let mut synapses = Vec::new();
@@ -169,15 +181,51 @@ fn iris_classification_test() {
     );
 
     println!("\n--- Network Architecture ---");
-    println!("Input neurons: {} (indices {}-{})", num_input_neurons, input_start, input_end-1);
-    println!("Hidden neurons: {} (indices {}-{})", NUM_HIDDEN_NEURONS, hidden_start, hidden_end-1);
-    println!("Output neurons: {} (indices {}-{})", NUM_OUTPUT_NEURONS, output_start, output_end-1);
-    println!("Reward neurons: {} (indices {}-{})", NUM_REWARD_NEURONS, reward_start, reward_end-1);
-    println!("Pain neurons: {} (indices {}-{})", NUM_PAIN_NEURONS, pain_start, pain_end-1);
+    println!(
+        "Input neurons: {} (indices {}-{})",
+        num_input_neurons,
+        input_start,
+        input_end - 1
+    );
+    println!(
+        "Hidden neurons: {} (indices {}-{})",
+        NUM_HIDDEN_NEURONS,
+        hidden_start,
+        hidden_end - 1
+    );
+    println!(
+        "Output neurons: {} (indices {}-{})",
+        NUM_OUTPUT_NEURONS,
+        output_start,
+        output_end - 1
+    );
+    println!(
+        "Reward neurons: {} (indices {}-{})",
+        NUM_REWARD_NEURONS,
+        reward_start,
+        reward_end - 1
+    );
+    println!(
+        "Pain neurons: {} (indices {}-{})",
+        NUM_PAIN_NEURONS,
+        pain_start,
+        pain_end - 1
+    );
     network.describe();
 
     // --- 3. Training Loop with Supervised Learning ---
-    let steps_per_image = 30; // Reduced from 50 for faster training
+    // === SIMULATION PARAMETERS ===
+    // These control how long each image is presented to the network
+    const STEPS_PER_IMAGE: usize = 100; // Number of timesteps per image (increase for deeper networks)
+    const STEP_SIZE_MS: f64 = 1.0; // Time step in milliseconds
+
+    // With 100 hidden neurons and synaptic delay of 2ms, signals need ~3-5 propagation steps
+    // Total simulation time per image: STEPS_PER_IMAGE * STEP_SIZE_MS = 50 * 0.3 = 15ms
+
+    println!("\n--- Simulation Parameters ---");
+    println!("Steps per image: {}", STEPS_PER_IMAGE);
+    println!("Step size: {} ms", STEP_SIZE_MS);
+    println!("Total time per image: {} ms", STEPS_PER_IMAGE as f64 * STEP_SIZE_MS);
 
     println!("\n--- Training Phase (Supervised with Reward/Pain) ---");
     let training_start = Instant::now();
@@ -187,7 +235,7 @@ fn iris_classification_test() {
     let training_inputs: Vec<(Vec<Vec<f64>>, usize)> = training_set
         .par_iter()
         .map(|(img, label)| {
-            let input_vector: Vec<Vec<f64>> = (0..steps_per_image)
+            let input_vector: Vec<Vec<f64>> = (0..STEPS_PER_IMAGE)
                 .map(|_| {
                     img.pixels()
                         .map(|pixel| {
@@ -203,69 +251,93 @@ fn iris_classification_test() {
 
     println!("Training on {} images...", training_inputs.len());
 
-    let train_pb = indicatif::ProgressBar::new(training_inputs.len() as u64);
+    // === PARALLEL BATCH TRAINING ===
+    const BATCH_SIZE: usize = 8; // Process 8 images in parallel
+    let num_batches = (training_inputs.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+
+    let train_pb = indicatif::ProgressBar::new(num_batches as u64);
     train_pb.set_style(
         indicatif::ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} Loss: {msg}")
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} batches - Loss: {msg}")
             .unwrap()
-            .progress_chars("##-")
+            .progress_chars("##-"),
     );
 
     let mut running_loss = 0.0;
     let mut correct_count = 0;
-    let loss_print_interval = 10; // Print loss every 10 images
+    let loss_print_interval = 2; // Print loss every 2 batches (more frequent feedback)
 
-    for (epoch, (input_vector, label)) in training_inputs.iter().enumerate() {
-        // Simulate with supervised learning signal
-        let _potentials = network.simulate_supervised(
-            steps_per_image,
-            0.3,
-            input_vector,
-            Some(*label), // Provide the correct label
-            false, // Don't show progress bar for each image
-            false, // Don't track potentials during training
-        );
+    for (batch_idx, batch_start) in (0..training_inputs.len()).step_by(BATCH_SIZE).enumerate() {
+        let batch_end = (batch_start + BATCH_SIZE).min(training_inputs.len());
+        let batch = &training_inputs[batch_start..batch_end];
 
-        // Calculate loss: we'll use a simple 0-1 loss (1 for incorrect, 0 for correct)
-        // To determine if correct, we need to check the output neuron spike counts
-        // For simplicity during training, we'll estimate based on the supervision applied
-        // A better approach is to actually track the prediction
+        // Train on each sample in the batch in parallel
+        let trained_networks: Vec<Network> = batch
+            .par_iter()
+            .map(|(input_vector, label)| {
+                let mut net_clone = network.clone();
+                net_clone.reset_state();
 
-        // Quick prediction check by running a forward pass
-        let potentials = network.simulate_supervised(
-            steps_per_image,
-            0.3,
-            input_vector,
-            None, // No supervision for prediction check
-            false,
-            true, // Track potentials to make prediction
-        );
+                // Train on this sample
+                net_clone.simulate_supervised(
+                    STEPS_PER_IMAGE,
+                    STEP_SIZE_MS,
+                    input_vector,
+                    Some(*label),
+                    false,
+                    false,
+                );
 
-        // Check which output neuron had more spikes
-        let mut output_spike_counts = vec![0; 2];
-        for potential_snapshot in &potentials {
-            if potential_snapshot[output_start] > 30.0 {
-                output_spike_counts[0] += 1;
+                net_clone
+            })
+            .collect();
+
+        // === BATCH AGGREGATION: Average weights from all parallel training runs ===
+        // Each network in the batch learned independently on one sample.
+        // We combine them by averaging all synapse weights and plasticity values.
+        // This is similar to synchronous data-parallel SGD in deep learning.
+        if !trained_networks.is_empty() {
+            let other_networks = &trained_networks[1..];
+            network = trained_networks[0].clone();
+            network.average_weights(other_networks);
+        }
+
+        // Calculate loss for this batch
+        for (input_vector, label) in batch {
+            let mut eval_net = network.clone();
+            eval_net.reset_state();
+
+            let potentials =
+                eval_net.simulate_supervised(STEPS_PER_IMAGE, STEP_SIZE_MS, input_vector, None, false, true);
+
+            let mut output_spike_counts = vec![0; 2];
+            for potential_snapshot in &potentials {
+                if potential_snapshot[output_start] > 30.0 {
+                    output_spike_counts[0] += 1;
+                }
+                if potential_snapshot[output_start + 1] > 30.0 {
+                    output_spike_counts[1] += 1;
+                }
             }
-            if potential_snapshot[output_start + 1] > 30.0 {
-                output_spike_counts[1] += 1;
+
+            let predicted_label = if output_spike_counts[0] > output_spike_counts[1] {
+                0
+            } else {
+                1
+            };
+
+            if predicted_label == *label {
+                correct_count += 1;
+            } else {
+                running_loss += 1.0;
             }
         }
 
-        let predicted_label = if output_spike_counts[0] > output_spike_counts[1] { 0 } else { 1 };
-        let is_correct = predicted_label == *label;
-
-        if is_correct {
-            correct_count += 1;
-            running_loss += 0.0; // No loss for correct predictions
-        } else {
-            running_loss += 1.0; // Loss of 1 for incorrect predictions
-        }
-
-        // Print loss every N images
-        if (epoch + 1) % loss_print_interval == 0 {
-            let avg_loss = running_loss / loss_print_interval as f64;
-            let accuracy = (correct_count as f64 / loss_print_interval as f64) * 100.0;
+        // Print loss every N batches
+        if (batch_idx + 1) % loss_print_interval == 0 {
+            let samples_counted = loss_print_interval * BATCH_SIZE.min(batch.len());
+            let avg_loss = running_loss / samples_counted as f64;
+            let accuracy = (correct_count as f64 / samples_counted as f64) * 100.0;
             train_pb.set_message(format!("{:.3} (Acc: {:.1}%)", avg_loss, accuracy));
             running_loss = 0.0;
             correct_count = 0;
@@ -286,7 +358,7 @@ fn iris_classification_test() {
     let test_inputs: Vec<(Vec<Vec<f64>>, usize)> = test_set
         .par_iter()
         .map(|(img, label)| {
-            let input_vector: Vec<Vec<f64>> = (0..steps_per_image)
+            let input_vector: Vec<Vec<f64>> = (0..STEPS_PER_IMAGE)
                 .map(|_| {
                     img.pixels()
                         .map(|pixel| {
@@ -311,16 +383,16 @@ fn iris_classification_test() {
         indicatif::ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} {msg}")
             .unwrap()
-            .progress_chars("##-")
+            .progress_chars("##-"),
     );
 
-    for (test_idx, (input_vector, actual_label)) in test_inputs.iter().enumerate() {
+    for (_test_idx, (input_vector, actual_label)) in test_inputs.iter().enumerate() {
         // Simulate without supervision (testing mode)
         let potentials = network.simulate_supervised(
-            steps_per_image,
-            0.3,
+            STEPS_PER_IMAGE,
+            STEP_SIZE_MS,
             input_vector,
-            None, // No label during testing
+            None,  // No label during testing
             false, // Don't show progress bar
             true,  // Track potentials for evaluation
         );
@@ -341,7 +413,11 @@ fn iris_classification_test() {
             }
         }
 
-        let predicted_label = if output1_spike_count > output2_spike_count { 0 } else { 1 };
+        let predicted_label = if output1_spike_count > output2_spike_count {
+            0
+        } else {
+            1
+        };
 
         // Update confusion matrix
         confusion_matrix[*actual_label][predicted_label] += 1;
@@ -357,17 +433,25 @@ fn iris_classification_test() {
     let accuracy = (correct_predictions as f64 / test_inputs.len() as f64) * 100.0;
 
     println!("\n--- Results ---");
-    println!("Test Accuracy: {:.2}% ({}/{})",
-             accuracy, correct_predictions, test_inputs.len());
+    println!(
+        "Test Accuracy: {:.2}% ({}/{})",
+        accuracy,
+        correct_predictions,
+        test_inputs.len()
+    );
 
     // Display confusion matrix
     println!("\n--- Confusion Matrix ---");
     println!("                  Predicted");
     println!("                  Setosa  Versicolour");
-    println!("Actual Setosa       {:>3}      {:>3}",
-             confusion_matrix[0][0], confusion_matrix[0][1]);
-    println!("       Versicolour  {:>3}      {:>3}",
-             confusion_matrix[1][0], confusion_matrix[1][1]);
+    println!(
+        "Actual Setosa       {:>3}      {:>3}",
+        confusion_matrix[0][0], confusion_matrix[0][1]
+    );
+    println!(
+        "       Versicolour  {:>3}      {:>3}",
+        confusion_matrix[1][0], confusion_matrix[1][1]
+    );
 
     // Calculate per-class metrics
     let setosa_total = confusion_matrix[0][0] + confusion_matrix[0][1];
@@ -375,14 +459,19 @@ fn iris_classification_test() {
 
     if setosa_total > 0 {
         let setosa_accuracy = (confusion_matrix[0][0] as f64 / setosa_total as f64) * 100.0;
-        println!("\nSetosa accuracy: {:.2}% ({}/{})",
-                 setosa_accuracy, confusion_matrix[0][0], setosa_total);
+        println!(
+            "\nSetosa accuracy: {:.2}% ({}/{})",
+            setosa_accuracy, confusion_matrix[0][0], setosa_total
+        );
     }
 
     if versicolour_total > 0 {
-        let versicolour_accuracy = (confusion_matrix[1][1] as f64 / versicolour_total as f64) * 100.0;
-        println!("Versicolour accuracy: {:.2}% ({}/{})",
-                 versicolour_accuracy, confusion_matrix[1][1], versicolour_total);
+        let versicolour_accuracy =
+            (confusion_matrix[1][1] as f64 / versicolour_total as f64) * 100.0;
+        println!(
+            "Versicolour accuracy: {:.2}% ({}/{})",
+            versicolour_accuracy, confusion_matrix[1][1], versicolour_total
+        );
     }
 
     // Calculate precision and recall
@@ -390,15 +479,21 @@ fn iris_classification_test() {
     let predicted_versicolour_total = confusion_matrix[0][1] + confusion_matrix[1][1];
 
     if predicted_setosa_total > 0 {
-        let setosa_precision = (confusion_matrix[0][0] as f64 / predicted_setosa_total as f64) * 100.0;
-        println!("\nSetosa precision: {:.2}% (when predicted setosa, correct {}/{} times)",
-                 setosa_precision, confusion_matrix[0][0], predicted_setosa_total);
+        let setosa_precision =
+            (confusion_matrix[0][0] as f64 / predicted_setosa_total as f64) * 100.0;
+        println!(
+            "\nSetosa precision: {:.2}% (when predicted setosa, correct {}/{} times)",
+            setosa_precision, confusion_matrix[0][0], predicted_setosa_total
+        );
     }
 
     if predicted_versicolour_total > 0 {
-        let versicolour_precision = (confusion_matrix[1][1] as f64 / predicted_versicolour_total as f64) * 100.0;
-        println!("Versicolour precision: {:.2}% (when predicted versicolour, correct {}/{} times)",
-                 versicolour_precision, confusion_matrix[1][1], predicted_versicolour_total);
+        let versicolour_precision =
+            (confusion_matrix[1][1] as f64 / predicted_versicolour_total as f64) * 100.0;
+        println!(
+            "Versicolour precision: {:.2}% (when predicted versicolour, correct {}/{} times)",
+            versicolour_precision, confusion_matrix[1][1], predicted_versicolour_total
+        );
     }
 
     network.describe();

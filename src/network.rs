@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use rayon::prelude::*;
 
 /// A simple struct to hold the network components.
+#[derive(Clone)]
 pub struct Network {
     pub neurons: Vec<Neuron>,
     pub synapses: Vec<ChemicalSynapse>,
@@ -400,8 +401,6 @@ impl Network {
                 }
             }
 
-            // Mutable borrow of target ends here automatically
-
             // Standard STDP update
             for &syn_idx in &entering_synapses {
                 let synapse = &mut self.synapses[syn_idx];
@@ -435,36 +434,67 @@ impl Network {
             .unwrap_or(0);
 
         let correct_output_neuron = self.output_neurons[correct_label];
-        let predicted_output_neuron = self.output_neurons[predicted_label];
 
-        if predicted_label == correct_label {
-            // REWARD: Strengthen connections to the correct output neuron
-            if !self.reward_neurons.is_empty() {
-                let reward_neuron_idx = self.reward_neurons[correct_label];
-                // Force reward neuron to spike
-                self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
+        // === SOFT SUPERVISION: Scale rewards/punishments by spike proportions ===
 
-                // Apply positive modulation to synapses leading to correct output
-                self.modulate_synapses_to_neuron(correct_output_neuron, 1.5);
-            }
-        } else {
-            // PUNISHMENT: Weaken connections to incorrect output, strengthen correct
-            if !self.pain_neurons.is_empty() && predicted_label < self.pain_neurons.len() {
-                let pain_neuron_idx = self.pain_neurons[predicted_label];
-                // Force pain neuron to spike
-                self.neurons[pain_neuron_idx].last_spike_time = self.current_time;
+        // Calculate total spikes across all output neurons
+        let total_spikes: usize = output_spike_counts.iter().sum();
 
-                // Apply negative modulation to synapses leading to incorrect output
-                self.modulate_synapses_to_neuron(predicted_output_neuron, -1.0);
-            }
-
-            // Also reward the correct path (but less strongly since it didn't fire enough)
+        if total_spikes == 0 {
+            // No output activity - strongly reward the correct output to encourage activity
             if !self.reward_neurons.is_empty() {
                 let reward_neuron_idx = self.reward_neurons[correct_label];
                 self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
+                self.modulate_synapses_to_neuron(correct_output_neuron, 3.0);
+            }
+            return;
+        }
 
-                // Apply positive modulation to synapses leading to correct output
-                self.modulate_synapses_to_neuron(correct_output_neuron, 0.8);
+        // For each output neuron, apply modulation based on its performance
+        for (output_idx, &spike_count) in output_spike_counts.iter().enumerate() {
+            let output_neuron = self.output_neurons[output_idx];
+            let spike_fraction = spike_count as f64 / total_spikes as f64;
+
+            if output_idx == correct_label {
+                // This is the CORRECT output neuron
+                // Reward proportional to how much it spiked
+                // If it spiked 100% of the time: full reward (1.0)
+                // If it spiked 50% of the time: partial reward (0.5)
+                // If it didn't spike: no reward, but also punish to encourage it
+
+                let modulation = if spike_fraction > 0.5 {
+                    // It's already dominant - reinforce it moderately
+                    1.0 + spike_fraction
+                } else if spike_fraction > 0.0 {
+                    // It's spiking but not dominant - strongly encourage it
+                    2.0 + (1.0 - spike_fraction) * 2.0
+                } else {
+                    // It's not spiking at all - very strong encouragement
+                    3.0
+                };
+
+                if !self.reward_neurons.is_empty() {
+                    let reward_neuron_idx = self.reward_neurons[output_idx];
+                    self.neurons[reward_neuron_idx].last_spike_time = self.current_time;
+                    self.modulate_synapses_to_neuron(output_neuron, modulation);
+                }
+
+            } else {
+                // This is an INCORRECT output neuron
+                // Punish proportional to how much it spiked
+                // If it spiked 100% of the time: strong punishment (-2.0)
+                // If it spiked 50% of the time: moderate punishment (-1.0)
+                // If it didn't spike: no punishment needed (already doing the right thing)
+
+                if spike_fraction > 0.0 {
+                    let punishment = -(1.0 + spike_fraction * 2.0);
+
+                    if !self.pain_neurons.is_empty() && output_idx < self.pain_neurons.len() {
+                        let pain_neuron_idx = self.pain_neurons[output_idx];
+                        self.neurons[pain_neuron_idx].last_spike_time = self.current_time;
+                        self.modulate_synapses_to_neuron(output_neuron, punishment);
+                    }
+                }
             }
         }
     }
@@ -482,6 +512,36 @@ impl Network {
             if source_spike_time.is_finite() && target_spike_time.is_finite() {
                 synapse.update_weight_modulated(source_spike_time, target_spike_time, modulation_factor);
             }
+        }
+    }
+
+    /// Average synapse weights from multiple network instances (for parallel batch training)
+    pub fn average_weights(&mut self, other_networks: &[Network]) {
+        let num_networks = other_networks.len() + 1; // +1 for self
+
+        for syn_idx in 0..self.synapses.len() {
+            let mut total_weight = self.synapses[syn_idx].weight;
+            let mut total_plasticity = self.synapses[syn_idx].plasticity;
+
+            for other in other_networks {
+                total_weight += other.synapses[syn_idx].weight;
+                total_plasticity += other.synapses[syn_idx].plasticity;
+            }
+
+            self.synapses[syn_idx].weight = total_weight / num_networks as f64;
+            self.synapses[syn_idx].plasticity = total_plasticity / num_networks as f64;
+        }
+    }
+
+    /// Reset the network state for a new simulation (clear event queue, reset time)
+    pub fn reset_state(&mut self) {
+        self.event_queue.clear();
+        self.current_time = 0.0;
+        // Reset neuron membrane potentials and spike history to resting state
+        for neuron in &mut self.neurons {
+            neuron.membrane_potential = neuron.resting_potential;
+            neuron.last_accessed_time = 0.0;
+            neuron.last_spike_time = f64::NEG_INFINITY; // Reset spike history so neurons don't carry over action potentials
         }
     }
 }
