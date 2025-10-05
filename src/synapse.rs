@@ -7,6 +7,10 @@ pub trait Synapse {
     /// `post_spike_time` is the time the target neuron fired.
     fn update_weight(&mut self, pre_spike_time: f64, post_spike_time: f64);
 
+    /// Applies reward-modulated STDP learning rule
+    /// `modulation_factor` is the reward (+) or punishment (-) signal
+    fn update_weight_modulated(&mut self, pre_spike_time: f64, post_spike_time: f64, modulation_factor: f64);
+
     fn new(source_neuron: usize, target_neuron: usize) -> Self;
 
     fn get_source(&self) -> usize;
@@ -56,6 +60,33 @@ impl Synapse for ChemicalSynapse {
         );*/
     }
 
+    /// Reward-modulated STDP: modulation_factor > 0 for reward, < 0 for punishment
+    fn update_weight_modulated(&mut self, pre_spike_time: f64, post_spike_time: f64, modulation_factor: f64) {
+        let mut delta_t = post_spike_time - pre_spike_time;
+        let delta_w;
+
+        // Long-Term Potentiation (LTP): Pre-synaptic spike before post-synaptic spike
+        if delta_t > 0.0 {
+            delta_w = self.plasticity * (-delta_t / SYNAPSE_LTP_DECAY).exp();
+        }
+        // Long-Term Depression (LTD): Post-synaptic spike before pre-synaptic spike
+        else if delta_t < 0.0 {
+            delta_t = delta_t.clamp(-SYNAPSE_LTP_DECAY, 0.0);
+            delta_w = -self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp();
+        } else {
+            return;
+        }
+
+        // Apply modulation: reward amplifies, punishment reverses or suppresses
+        let modulated_delta_w = delta_w * modulation_factor;
+
+        self.weight += modulated_delta_w;
+        self.weight = self.weight.clamp(
+            MINIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+            MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
+        );
+    }
+
     /// Constructor for a new chemical synapse with a random initial weight.
     fn new(source_neuron: usize, target_neuron: usize) -> Self {
         let initial_weight = rand::rng().random_range(0.4..=0.6);
@@ -91,6 +122,11 @@ impl Synapse for ElectricalSynapse {
     fn update_weight(&mut self, _pre_spike_time: f64, _post_spike_time: f64) {
         // Do nothing, electrical synapses are not plastic
     }
+
+    fn update_weight_modulated(&mut self, _pre_spike_time: f64, _post_spike_time: f64, _modulation_factor: f64) {
+        // Do nothing, electrical synapses are not plastic
+    }
+
     fn new(source_neuron: usize, target_neuron: usize) -> Self {
         ElectricalSynapse {
             source_neuron,
@@ -105,4 +141,3 @@ impl Synapse for ElectricalSynapse {
         self.target_neuron
     }
 }
-
