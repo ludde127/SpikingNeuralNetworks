@@ -1,0 +1,27 @@
+// Constants for synapse behavior
+pub const MINIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 0.0;
+pub const MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT: f64 = 1.0;
+pub const ELECTRICAL_SYNAPSE_WEIGHT: f64 =
+    (MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT - MINIMUM_CHEMICAL_SYNAPSE_WEIGHT) / 2.0;
+pub const LONG_TERM_POTENTIATION_TIME_WINDOW: f64 = 20.0;
+pub const LONG_TERM_DEPRESSION_TIME_WINDOW: f64 = 20.0;
+pub const SYNAPSE_LTP_DECAY: f64 = 10.0;
+pub const SYNAPSE_LTD_DECAY: f64 = 10.0;
+
+pub const ADAPTIVE_LEARNING_RATE_SCALING_FACTOR: f64 = 0.05;
+pub const WEIGHT_NORMALIZATION_FACTOR: f64 = 2.0;
+pub const WEIGHT_RANGE_END_VALUE: f64 = 1.0;
+
+// Constants for neuron behavior
+pub const MEAN_NEURON_RESTING_POTENTIAL: f64 = 0.0; // -70 millivolt
+pub const MEAN_NEURON_THRESHOLD: f64 = 43e-3; // -55 millivolt
+pub const MEAN_NEURON_ABSOLUTE_REFRACTORY_TIME: f64 = 1.5; // ms
+
+pub const MEAN_NEURON_MEMBRANE_TIME_CONSTANT: f64 = 15.0; // ms
+pub const MEAN_HYPERPOLARIZATION_DEPTH: f64 = 25e-3; // V
+pub const MEAN_HYPERPOLARIZATION_TIME_CONSTANT: f64 = 3.5; // ms
+
+// Constants for spike transmission
+pub const SYNAPSE_SPIKE_TIME: f64 = 2.0;
+pub const POSTSYNAPTIC_POTENTIAL_AMPLITUDE: f64 = 2.0e-1; // 20 millivolt change
+
