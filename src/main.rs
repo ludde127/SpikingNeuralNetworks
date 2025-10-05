@@ -1,15 +1,16 @@
-use std::collections::VecDeque;
+use image::GrayImage;
 use indicatif::ProgressBar;
+use petgraph::dot::{Config, Dot};
+use petgraph::graph::{DiGraph, NodeIndex};
+use plotters::prelude::*;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
-use plotters::prelude::*;
-use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::dot::{Dot, Config};
+use std::cmp::{Ordering, Reverse};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
-use image::GrayImage;
-use rand::rngs::StdRng;
 /*
 ## Synapse
 A synapse is a structure that allows a neuron to signal another neuron, these can be
@@ -259,7 +260,8 @@ impl Synapse for ChemicalSynapse {
         else if delta_t < 0.0 {
             // 20ms window for LTD
             delta_t = delta_t.clamp(-SYNAPSE_LTP_DECAY, 0.0);
-            delta_w = -self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp(); // Exponential decay
+            delta_w = -self.plasticity * (-(-delta_t) / SYNAPSE_LTD_DECAY).exp();
+        // Exponential decay
         } else {
             // This happens if simultaneous firing or if the prespike neuron have never fired
             return;
@@ -317,7 +319,7 @@ impl Synapse for ElectricalSynapse {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 struct SpikeEvent {
     source_neuron: usize,
     target_neuron: usize,
@@ -325,6 +327,29 @@ struct SpikeEvent {
     spike_time: f64,
     arrival_time: f64,
     weight: f64,
+}
+
+impl PartialEq for SpikeEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.arrival_time == other.arrival_time
+    }
+}
+
+impl Eq for SpikeEvent {}
+
+impl PartialOrd for SpikeEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.arrival_time.partial_cmp(&other.arrival_time)
+    }
+}
+
+impl Ord for SpikeEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse to make BinaryHeap a min-heap for arrival_time
+        self.arrival_time
+            .partial_cmp(&other.arrival_time)
+            .unwrap_or(Ordering::Equal)
+    }
 }
 
 /// A simple struct to hold the network components.
@@ -349,33 +374,36 @@ impl Network {
 
         let total_weight: f64 = self.synapses.iter().map(|s| s.weight).sum();
         let avg_weight = total_weight / self.synapses.len() as f64;
-        let max_weight = self.synapses.iter().map(|s| s.weight).fold(
-            MINIMUM_CHEMICAL_SYNAPSE_WEIGHT,
-            |a, b| a.max(b),
-        );
-        let min_weight = self.synapses.iter().map(|s| s.weight).fold(
-            MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT,
-            |a, b| a.min(b),
-        );
+        let max_weight = self
+            .synapses
+            .iter()
+            .map(|s| s.weight)
+            .fold(MINIMUM_CHEMICAL_SYNAPSE_WEIGHT, |a, b| a.max(b));
+        let min_weight = self
+            .synapses
+            .iter()
+            .map(|s| s.weight)
+            .fold(MAXIMUM_CHEMICAL_SYNAPSE_WEIGHT, |a, b| a.min(b));
         println!(
             "Synapse weights - Avg: {:.4}, Min: {:.4}, Max: {:.4}",
             avg_weight, min_weight, max_weight
         );
         let total_plasticity: f64 = self.synapses.iter().map(|s| s.plasticity).sum();
         let avg_plasticity = total_plasticity / self.synapses.len() as f64;
-        let max_plasticity = self.synapses.iter().map(|s| s.plasticity).fold(
-            0.0,
-            |a, b| a.max(b),
-        );
-        let min_plasticity = self.synapses.iter().map(|s| s.plasticity).fold(
-            f64::INFINITY,
-            |a, b| a.min(b),
-        );
+        let max_plasticity = self
+            .synapses
+            .iter()
+            .map(|s| s.plasticity)
+            .fold(0.0, |a, b| a.max(b));
+        let min_plasticity = self
+            .synapses
+            .iter()
+            .map(|s| s.plasticity)
+            .fold(f64::INFINITY, |a, b| a.min(b));
         println!(
             "Synapse plasticity - Avg: {:.4}, Min: {:.4}, Max: {:.4}",
             avg_plasticity, min_plasticity, max_plasticity
         );
-
 
         // Num synapses with weight equal to minimum
         let num_min_weight = self
@@ -428,7 +456,6 @@ impl Network {
         step_size_ms: f64,
         inputs: &mut Vec<Vec<f64>>,
     ) -> Vec<Vec<f64>> {
-
         let mut potentials: Vec<Vec<f64>> = Vec::new();
 
         let mut spike_event_counter: usize = 0;
@@ -490,68 +517,52 @@ impl Network {
     }
 
     fn process_events(&mut self, spike_event_counter: &mut usize) {
-        let mut i = 0;
-        let initial_queue_length = self.event_queue.len();
-        while i < initial_queue_length {
-            let event = self.event_queue.pop_front();
-            if event.is_none() {
+        while let Some(event) = self.event_queue.front() {
+            if event.arrival_time > self.current_time {
                 break;
             }
-            let event = event.unwrap();
-            if event.arrival_time <= self.current_time {
-                *spike_event_counter += 1;
-                let target_idx = event.target_neuron;
-
-                let target = &mut self.neurons[target_idx];
-                let mut target_last_spike_time = target.last_spike_time;
-                let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight; // All have the same potential in this simplification
-                let action_potential = target.receive(potential, self.current_time);
-                let exiting = &target.exiting_synapses;
-
-                if action_potential > 0.0 {
-                    // --- POST neuron spiked now ---
-                    target_last_spike_time = self.current_time;
-
-                    // propagate spikes
-                    for out_syn_idx in exiting {
-                        let out_syn = &self.synapses[*out_syn_idx];
-                        if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
-                            continue;
-                        }
-                        self.event_queue.push_back(SpikeEvent {
-                            source_neuron: target_idx,
-                            target_neuron: out_syn.target_neuron,
-                            spike_time: self.current_time,
-                            arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
-                            weight: out_syn.weight,
-                            synapse_index: *out_syn_idx,
-                        });
-                    }
-                }
-                for syn_idx in target.entering_synapses.clone() {
-                    let synapse = &mut self.synapses[syn_idx];
-
-                    if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+            let event = self.event_queue.pop_front().unwrap();
+            *spike_event_counter += 1;
+            let target_idx = event.target_neuron;
+            let target = &mut self.neurons[target_idx];
+            let mut target_last_spike_time = target.last_spike_time;
+            let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;
+            let action_potential = target.receive(potential, self.current_time);
+            let exiting = &target.exiting_synapses;
+            if action_potential > 0.0 {
+                target_last_spike_time = self.current_time;
+                for out_syn_idx in exiting {
+                    let out_syn = &self.synapses[*out_syn_idx];
+                    if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                         continue;
                     }
-
-                    let source_idx = synapse.source_neuron;
-                    let neuron = &self.neurons[source_idx];
-                    let pre_time = if neuron.last_spike_time == self.current_time
-                        && source_idx == event.source_neuron
-                    {
-                        event.spike_time
-                    } else {
-                        neuron.last_spike_time
-                    };
-
-                    if pre_time.is_finite() {
-                        synapse.update_weight(pre_time, target_last_spike_time);
-                    }
+                    self.event_queue.push_back(SpikeEvent {
+                        source_neuron: target_idx,
+                        target_neuron: out_syn.target_neuron,
+                        spike_time: self.current_time,
+                        arrival_time: self.current_time + SYNAPSE_SPIKE_TIME,
+                        weight: out_syn.weight,
+                        synapse_index: *out_syn_idx,
+                    });
                 }
-            } else {
-                self.event_queue.push_back(event);
-                i += 1;
+            }
+            for syn_idx in target.entering_synapses.clone() {
+                let synapse = &mut self.synapses[syn_idx];
+                if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
+                    continue;
+                }
+                let source_idx = synapse.source_neuron;
+                let neuron = &self.neurons[source_idx];
+                let pre_time = if neuron.last_spike_time == self.current_time
+                    && source_idx == event.source_neuron
+                {
+                    event.spike_time
+                } else {
+                    neuron.last_spike_time
+                };
+                if pre_time.is_finite() {
+                    synapse.update_weight(pre_time, target_last_spike_time);
+                }
             }
         }
     }
@@ -598,9 +609,7 @@ impl Network {
                     1.0 + 4.0 * w, // thickness based on weight
                 )
             },
-            &|_, n| {
-                format!("label=\"N{}\"", n.0.index())
-            },
+            &|_, n| format!("label=\"N{}\"", n.0.index()),
         );
 
         let mut f = File::create(filename).unwrap();
@@ -619,7 +628,10 @@ impl Network {
         root.fill(&WHITE)?;
 
         let mut chart = ChartBuilder::on(&root)
-            .caption("Membrane Potentials of Input & Output Neurons", ("sans-serif", 30))
+            .caption(
+                "Membrane Potentials of Input & Output Neurons",
+                ("sans-serif", 30),
+            )
             .margin(10)
             .x_label_area_size(40)
             .y_label_area_size(60)
@@ -627,9 +639,17 @@ impl Network {
 
         chart.configure_mesh().draw()?;
 
-        for (i, idx) in self.input_neurons.iter().chain(self.output_neurons.iter()).enumerate() {
-            let series: Vec<(usize, f64)> =
-                potentials.iter().enumerate().map(|(t, v)| (t, v[*idx])).collect();
+        for (i, idx) in self
+            .input_neurons
+            .iter()
+            .chain(self.output_neurons.iter())
+            .enumerate()
+        {
+            let series: Vec<(usize, f64)> = potentials
+                .iter()
+                .enumerate()
+                .map(|(t, v)| (t, v[*idx]))
+                .collect();
             chart
                 .draw_series(LineSeries::new(series, &Palette99::pick(i)))?
                 .label(format!("Neuron {}", idx))
@@ -638,7 +658,10 @@ impl Network {
                 });
         }
 
-        chart.configure_series_labels().border_style(&BLACK).draw()?;
+        chart
+            .configure_series_labels()
+            .border_style(&BLACK)
+            .draw()?;
 
         Ok(())
     }
@@ -655,7 +678,9 @@ impl Network {
         let mut buckets = vec![0usize; NUM_BUCKETS];
         for s in &self.synapses {
             let mut idx = ((s.weight - min_weight) / bucket_width).floor() as usize;
-            if idx >= NUM_BUCKETS { idx = NUM_BUCKETS - 1; }
+            if idx >= NUM_BUCKETS {
+                idx = NUM_BUCKETS - 1;
+            }
             buckets[idx] += 1;
         }
         let root = BitMapBackend::new(filename, (1280, 720)).into_drawing_area();
@@ -667,7 +692,8 @@ impl Network {
             .x_label_area_size(40)
             .y_label_area_size(60)
             .build_cartesian_2d(0..NUM_BUCKETS, 0u32..max_count)?;
-        chart.configure_mesh()
+        chart
+            .configure_mesh()
             .x_desc("Weight Bucket")
             .y_desc("Count")
             .x_labels(NUM_BUCKETS)
@@ -716,7 +742,9 @@ fn simple_test() {
     let mut synapse_index = 0;
     for i in 0..TOTAL_NEURONS {
         for j in 0..TOTAL_NEURONS {
-            if (i == j) {continue};
+            if (i == j) {
+                continue;
+            };
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
             neurons[j].entering_synapses.push(synapse_index);
@@ -769,9 +797,10 @@ fn simple_test() {
     //network.visualize_graph("network.dot");
 
     // Plot membrane potentials
-    network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
+    network
+        .plot_membrane_potentials(&potentials, "membrane.png")
+        .unwrap();
     network.describe();
-
 }
 fn main() {
     println!("--- Starting Neuromorphic Network Test ---");
@@ -779,16 +808,15 @@ fn main() {
     // --- 1. Image Loading and Preprocessing ---
     let image_path = "test.jpg";
 
-    let img = image::open(image_path)
-        .expect("Failed to open image file");
+    let img = image::open(image_path).expect("Failed to open image file");
 
-    let resized_img: GrayImage = img.resize_exact(28, 28, image::imageops::Lanczos3).into_luma8();
+    let resized_img: GrayImage = img
+        .resize_exact(28, 28, image::imageops::Lanczos3)
+        .into_luma8();
     let (width, height) = resized_img.dimensions();
 
     // Convert pixel data to a normalized vector of firing rates (0.0 to 1.0)
-    let firing_rates: Vec<f64> = resized_img.pixels()
-        .map(|p| p[0] as f64 / 255.0)
-        .collect();
+    let firing_rates: Vec<f64> = resized_img.pixels().map(|p| p[0] as f64 / 255.0).collect();
 
     // --- 2. Network Setup ---
     const NUM_OUTPUT_NEURONS: usize = 1;
@@ -809,7 +837,9 @@ fn main() {
     let mut synapse_index = 0;
     for i in 0..total_neurons {
         for j in 0..total_neurons {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
             neurons[j].entering_synapses.push(synapse_index);
@@ -855,7 +885,9 @@ fn main() {
 
     println!("--- Simulation completed in {:.2?} ---", start.elapsed());
 
-    network.plot_membrane_potentials(&potentials, "membrane.png").unwrap();
+    network
+        .plot_membrane_potentials(&potentials, "membrane.png")
+        .unwrap();
     network.plot_synapse_weights("synapse_weights.png").unwrap();
     network.describe();
 }
