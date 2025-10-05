@@ -3,8 +3,8 @@ use crate::neuron::Neuron;
 use crate::spike_event::SpikeEvent;
 use crate::synapse::{ChemicalSynapse, Synapse};
 use indicatif::ProgressBar;
-use std::collections::VecDeque;
 use rayon::prelude::*;
+use std::collections::VecDeque;
 
 /// A simple struct to hold the network components.
 #[derive(Clone)]
@@ -201,14 +201,28 @@ impl Network {
             let event = self.event_queue.pop_front().unwrap();
             *spike_event_counter += 1;
             let target_idx = event.target_neuron;
-            let target = &mut self.neurons[target_idx];
-            let mut target_last_spike_time = target.last_spike_time;
+            let source_idx = event.source_neuron;
+
+            let (source_neuron, target_neuron) = if source_idx < target_idx {
+                let (left, right) = self.neurons.split_at_mut(target_idx);
+                (&left[source_idx], &mut right[0])
+            } else if source_idx > target_idx {
+                let (left, right) = self.neurons.split_at_mut(source_idx);
+                (&right[0], &mut left[target_idx])
+            } else {
+                // This case should ideally not happen in a well-formed network graph
+                // where a neuron does not synapse itself.
+                continue;
+            };
+
+            let mut target_last_spike_time = target_neuron.last_spike_time;
             let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;
-            let action_potential = target.receive(potential, self.current_time);
-            let exiting = &target.exiting_synapses;
+            let action_potential = target_neuron.receive(potential, self.current_time);
+            let exiting = target_neuron.exiting_synapses.clone();
+
             if action_potential > 0.0 {
                 target_last_spike_time = self.current_time;
-                for out_syn_idx in exiting {
+                for out_syn_idx in &exiting {
                     let out_syn = &self.synapses[*out_syn_idx];
                     if out_syn.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                         continue;
@@ -223,19 +237,18 @@ impl Network {
                     });
                 }
             }
-            for syn_idx in target.entering_synapses.clone() {
+
+            for syn_idx in target_neuron.entering_synapses.clone() {
                 let synapse = &mut self.synapses[syn_idx];
                 if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                     continue;
                 }
-                let source_idx = synapse.source_neuron;
-                let neuron = &self.neurons[source_idx];
-                let pre_time = if neuron.last_spike_time == self.current_time
-                    && source_idx == event.source_neuron
+                let pre_time = if source_neuron.last_spike_time == self.current_time
+                    && synapse.source_neuron == event.source_neuron
                 {
                     event.spike_time
                 } else {
-                    neuron.last_spike_time
+                    source_neuron.last_spike_time
                 };
                 if pre_time.is_finite() {
                     synapse.update_weight(pre_time, target_last_spike_time);
@@ -362,15 +375,27 @@ impl Network {
             let event = self.event_queue.pop_front().unwrap();
             *spike_event_counter += 1;
             let target_idx = event.target_neuron;
+            let source_idx = event.source_neuron;
 
             // Extract entering_synapses before borrowing target mutably
             let entering_synapses = self.neurons[target_idx].entering_synapses.clone();
 
-            let target = &mut self.neurons[target_idx];
-            let mut target_last_spike_time = target.last_spike_time;
+            let (source_neuron, target_neuron) = if source_idx < target_idx {
+                let (left, right) = self.neurons.split_at_mut(target_idx);
+                (&left[source_idx], &mut right[0])
+            } else if source_idx > target_idx {
+                let (left, right) = self.neurons.split_at_mut(source_idx);
+                (&right[0], &mut left[target_idx])
+            } else {
+                // This case should ideally not happen in a well-formed network graph
+                // where a neuron does not synapse itself.
+                continue;
+            };
+
+            let mut target_last_spike_time = target_neuron.last_spike_time;
             let potential = POSTSYNAPTIC_POTENTIAL_AMPLITUDE * event.weight;
-            let action_potential = target.receive(potential, self.current_time);
-            let exiting = target.exiting_synapses.clone();
+            let action_potential = target_neuron.receive(potential, self.current_time);
+            let exiting = target_neuron.exiting_synapses.clone();
 
             if action_potential > 0.0 {
                 target_last_spike_time = self.current_time;
@@ -407,14 +432,13 @@ impl Network {
                 if synapse.weight <= MINIMUM_CHEMICAL_SYNAPSE_WEIGHT {
                     continue;
                 }
-                let source_idx = synapse.source_neuron;
-                let neuron = &self.neurons[source_idx];
-                let pre_time = if neuron.last_spike_time == self.current_time
-                    && source_idx == event.source_neuron
+
+                let pre_time = if source_neuron.last_spike_time == self.current_time
+                    && synapse.source_neuron == event.source_neuron
                 {
                     event.spike_time
                 } else {
-                    neuron.last_spike_time
+                    source_neuron.last_spike_time
                 };
                 if pre_time.is_finite() {
                     synapse.update_weight(pre_time, target_last_spike_time);

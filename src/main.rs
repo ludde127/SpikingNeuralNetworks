@@ -137,25 +137,71 @@ fn iris_classification_test() {
     let pain_start = reward_end;
     let pain_end = pain_start + NUM_PAIN_NEURONS;
 
-    // Fully connected network (except reward/pain neurons)
+    // --- Connect Neurons ---
     let mut synapse_index = 0;
-    for i in 0..total_neurons {
-        for j in 0..total_neurons {
-            if i == j {
-                continue;
-            }
 
-            // Skip connections from/to reward and pain neurons (they are special)
-            if (i >= reward_start && i < pain_end) || (j >= reward_start && j < pain_end) {
-                continue;
-            }
-
+    // 1. Input -> Hidden
+    for i in input_start..input_end {
+        for j in hidden_start..hidden_end {
             synapses.push(ChemicalSynapse::new(i, j));
             neurons[i].exiting_synapses.push(synapse_index);
             neurons[j].entering_synapses.push(synapse_index);
             synapse_index += 1;
         }
     }
+
+    // 2. Hidden -> Hidden (recurrent connections)
+    for i in hidden_start..hidden_end {
+        for j in hidden_start..hidden_end {
+            if i == j { continue; }
+            synapses.push(ChemicalSynapse::new(i, j));
+            neurons[i].exiting_synapses.push(synapse_index);
+            neurons[j].entering_synapses.push(synapse_index);
+            synapse_index += 1;
+        }
+    }
+
+    // 3. Hidden -> Output
+    for i in hidden_start..hidden_end {
+        for j in output_start..output_end {
+            synapses.push(ChemicalSynapse::new(i, j));
+            neurons[i].exiting_synapses.push(synapse_index);
+            neurons[j].entering_synapses.push(synapse_index);
+            synapse_index += 1;
+        }
+    }
+
+    // 4. Output -> Reward/Pain (for supervised signal)
+    // Output neuron for class 0 connects to reward 0 and pain 1
+    // Output neuron for class 1 connects to reward 1 and pain 0
+    let output_0 = output_start;
+    let output_1 = output_start + 1;
+    let reward_0 = reward_start;
+    let reward_1 = reward_start + 1;
+    let pain_0 = pain_start;
+    let pain_1 = pain_start + 1;
+
+    // Connections for class 0 evaluation
+    synapses.push(ChemicalSynapse::new(output_0, reward_0));
+    neurons[output_0].exiting_synapses.push(synapse_index);
+    neurons[reward_0].entering_synapses.push(synapse_index);
+    synapse_index += 1;
+
+    synapses.push(ChemicalSynapse::new(output_0, pain_1));
+    neurons[output_0].exiting_synapses.push(synapse_index);
+    neurons[pain_1].entering_synapses.push(synapse_index);
+    synapse_index += 1;
+
+    // Connections for class 1 evaluation
+    synapses.push(ChemicalSynapse::new(output_1, reward_1));
+    neurons[output_1].exiting_synapses.push(synapse_index);
+    neurons[reward_1].entering_synapses.push(synapse_index);
+    synapse_index += 1;
+
+    synapses.push(ChemicalSynapse::new(output_1, pain_0));
+    neurons[output_1].exiting_synapses.push(synapse_index);
+    neurons[pain_0].entering_synapses.push(synapse_index);
+    synapse_index += 1;
 
     // Set up neuron indices
     for i in input_start..input_end {
@@ -216,11 +262,11 @@ fn iris_classification_test() {
     // --- 3. Training Loop with Supervised Learning ---
     // === SIMULATION PARAMETERS ===
     // These control how long each image is presented to the network
-    const STEPS_PER_IMAGE: usize = 100; // Number of timesteps per image (increase for deeper networks)
+    const STEPS_PER_IMAGE: usize = 50; // Number of timesteps per image (reduced for faster simulation)
     const STEP_SIZE_MS: f64 = 1.0; // Time step in milliseconds
 
     // With 100 hidden neurons and synaptic delay of 2ms, signals need ~3-5 propagation steps
-    // Total simulation time per image: STEPS_PER_IMAGE * STEP_SIZE_MS = 50 * 0.3 = 15ms
+    // Total simulation time per image: STEPS_PER_IMAGE * STEP_SIZE_MS = 50 * 1.0 = 50ms
 
     println!("\n--- Simulation Parameters ---");
     println!("Steps per image: {}", STEPS_PER_IMAGE);
