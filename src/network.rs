@@ -24,10 +24,15 @@ impl Network {
             neuron.reset();
         }
     }
+}
 
-    // --- Utility and Visualization ---
+pub trait VisualizeNetwork {
+    fn describe(&self);
+    fn plot_synapse_weights(&self, path: &str) -> Result<(), Box<dyn std::error::Error>>;
+}
 
-    pub fn describe(&self) {
+impl VisualizeNetwork for Network {
+    fn describe(&self) {
         println!("--- Network State ---");
         println!("Total neurons: {}", self.neurons.len());
         println!("Total synapses: {}", self.synapses.len());
@@ -53,7 +58,7 @@ impl Network {
         );
     }
 
-    pub fn plot_synapse_weights(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn plot_synapse_weights(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let root = BitMapBackend::new(path, (1024, 768)).into_drawing_area();
         root.fill(&WHITE)?;
 
