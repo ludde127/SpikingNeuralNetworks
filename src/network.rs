@@ -2,6 +2,7 @@ use crate::neuron::{Neuron, NeuronBehavior};
 use crate::synapse::{ChemicalSynapse, Synapse};
 use plotters::prelude::*;
 use std::sync::{Arc, RwLock};
+use crate::constants::MAX_NEURON_THRESHOLD;
 
 #[derive(Clone)]
 pub struct Network {
@@ -17,7 +18,7 @@ impl Network {
     pub fn create_dense(num_neurons: usize) -> Self {
         let mut neurons = Vec::with_capacity(num_neurons);
         for i in 0..num_neurons {
-            neurons.push(Arc::new(RwLock::new(Neuron::new(1.0, i))));
+            neurons.push(Arc::new(RwLock::new(Neuron::new(MAX_NEURON_THRESHOLD, i))));
         }
 
         let mut synapses = Vec::new();
