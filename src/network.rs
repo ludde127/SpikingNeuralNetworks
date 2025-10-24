@@ -28,6 +28,8 @@ impl Network {
                         neurons.get(pre).unwrap().clone(),
                         neurons.get(post).unwrap().clone(),
                     )));
+                    neurons.get(pre).unwrap().write().unwrap().exiting_synapses.push(synapse.clone());
+                    neurons.get(post).unwrap().write().unwrap().entering_synapses.push(synapse.clone());
                     synapses.push(synapse);
                 }
             }
@@ -39,7 +41,7 @@ impl Network {
     pub fn reset_state(&mut self) {
         for neuron in &self.neurons {
             let mut neuron = neuron.write().unwrap();
-            neuron.reset();
+            neuron.full_reset();
         }
     }
 }

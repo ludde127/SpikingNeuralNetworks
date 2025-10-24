@@ -1,8 +1,10 @@
+use crate::synapse::ChemicalSynapse;
 use std::cmp::Ordering;
+use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SpikeEvent {
-    pub synapse_index: usize,
+    pub synapse: Arc<RwLock<ChemicalSynapse>>,
     pub delivery_time: usize,
 }
 
