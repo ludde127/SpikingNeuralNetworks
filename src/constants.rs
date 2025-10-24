@@ -10,7 +10,6 @@ pub const STEP_SIZE_MS: f64 = 1.0;
 // --- Training Parameters ---
 pub const NUM_EPOCHS: usize = 64; // As per paper Table 1
 pub const LEARNING_RATE: f64 = 1.0 / 8.0; // As per paper Table 1
-
 // --- HaSiST Parameters ---
 pub const HASI_K: f64 = 0.5; // Steepness, as per paper Table 1
 pub const HASI_V_TH: f64 = 0.0; // Threshold, as per paper Table 1
