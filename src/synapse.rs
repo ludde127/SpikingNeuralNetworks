@@ -1,9 +1,11 @@
+use std::sync::{Arc, RwLock};
 use rand::Rng;
 use crate::constants::{MAX_SYNAPSE_DELAY_MS, MIN_SYNAPSE_DELAY_MS};
+use crate::neuron::Neuron;
 
 pub trait Synapse: Send + Sync {
-    fn get_presynaptic_neuron(&self) -> usize;
-    fn get_postsynaptic_neuron(&self) -> usize;
+    fn get_presynaptic_neuron(&self) -> Arc<RwLock<Neuron>>;
+    fn get_postsynaptic_neuron(&self) -> Arc<RwLock<Neuron>>;
     fn get_weight(&self) -> f32;
     fn get_delay(&self) -> f32;
     fn update_weight(&mut self, delta_w: f32);
@@ -18,14 +20,14 @@ impl Clone for Box<dyn Synapse> {
 
 #[derive(Clone, Debug)]
 pub struct ChemicalSynapse {
-    pub presynaptic_neuron: usize,
-    pub postsynaptic_neuron: usize,
+    pub presynaptic_neuron: Arc<RwLock<Neuron>>,
+    pub postsynaptic_neuron: Arc<RwLock<Neuron>>,
     pub weight: f32,
     pub delay: f32, // in milliseconds
 }
 
 impl ChemicalSynapse {
-    pub fn new(presynaptic_neuron: usize, postsynaptic_neuron: usize) -> Self {
+    pub fn new(presynaptic_neuron: Arc<RwLock<Neuron>>, postsynaptic_neuron: Arc<RwLock<Neuron>>) -> Self {
         let mut rng = rand::thread_rng();
         ChemicalSynapse {
             presynaptic_neuron,
@@ -37,12 +39,12 @@ impl ChemicalSynapse {
 }
 
 impl Synapse for ChemicalSynapse {
-    fn get_presynaptic_neuron(&self) -> usize {
-        self.presynaptic_neuron
+    fn get_presynaptic_neuron(&self) -> Arc<RwLock<Neuron>> {
+        self.presynaptic_neuron.clone()
     }
 
-    fn get_postsynaptic_neuron(&self) -> usize {
-        self.postsynaptic_neuron
+    fn get_postsynaptic_neuron(&self) -> Arc<RwLock<Neuron>> {
+        self.postsynaptic_neuron.clone()
     }
 
     fn get_weight(&self) -> f32 {

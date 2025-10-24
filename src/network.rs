@@ -1,26 +1,44 @@
 use crate::neuron::{Neuron, NeuronBehavior};
-use crate::synapse::Synapse;
+use crate::synapse::{ChemicalSynapse, Synapse};
 use plotters::prelude::*;
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub struct Network {
-    pub neurons: Vec<Neuron>,
-    pub synapses: Vec<Box<dyn Synapse>>,
+    pub neurons: Vec<Arc<RwLock<Neuron>>>,
+    pub synapses: Vec<Arc<RwLock<ChemicalSynapse>>>,
 }
 
 impl Network {
-    pub fn new(
-        neurons: Vec<Neuron>,
-        synapses: Vec<Box<dyn Synapse>>,
-    ) -> Self {
-        Network {
-            neurons,
-            synapses,
+    pub fn new(neurons: Vec<Arc<RwLock<Neuron>>>, synapses: Vec<Arc<RwLock<ChemicalSynapse>>>) -> Self {
+        Network { neurons, synapses }
+    }
+
+    pub fn create_dense(num_neurons: usize) -> Self {
+        let mut neurons = Vec::with_capacity(num_neurons);
+        for i in 0..num_neurons {
+            neurons.push(Arc::new(RwLock::new(Neuron::new(1.0, i))));
         }
+
+        let mut synapses = Vec::new();
+        for pre in 0..neurons.len() {
+            for post in 0..neurons.len() {
+                if pre != post {
+                    let synapse = Arc::new(RwLock::new(ChemicalSynapse::new(
+                        neurons.get(pre).unwrap().clone(),
+                        neurons.get(post).unwrap().clone(),
+                    )));
+                    synapses.push(synapse);
+                }
+            }
+        }
+
+        Network { neurons, synapses }
     }
 
     pub fn reset_state(&mut self) {
-        for neuron in &mut self.neurons {
+        for neuron in &self.neurons {
+            let mut neuron = neuron.write().unwrap();
             neuron.reset();
         }
     }
@@ -40,7 +58,8 @@ impl VisualizeNetwork for Network {
         let mut min_w = f32::MAX;
         let mut max_w = f32::MIN;
         let mut avg_w = 0.0;
-        for s in &self.synapses {
+        for _s in &self.synapses {
+            let s = _s.read().unwrap();
             let w = s.get_weight();
             if w < min_w {
                 min_w = w;
@@ -62,7 +81,7 @@ impl VisualizeNetwork for Network {
         let root = BitMapBackend::new(path, (1024, 768)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let weights: Vec<f32> = self.synapses.iter().map(|s| s.get_weight()).collect();
+        let weights: Vec<f32> = self.synapses.iter().map(|s| s.read().unwrap().get_weight()).collect();
         if weights.is_empty() {
             return Ok(());
         }
@@ -96,7 +115,10 @@ impl VisualizeNetwork for Network {
         let max_count = *bins.iter().max().unwrap_or(&0) as u32;
 
         let mut chart = ChartBuilder::on(&root)
-            .caption("Synapse Weight Distribution", ("sans-serif", 50).into_font())
+            .caption(
+                "Synapse Weight Distribution",
+                ("sans-serif", 50).into_font(),
+            )
             .margin(10)
             .x_label_area_size(30)
             .y_label_area_size(30)

@@ -1,5 +1,6 @@
 
 #[derive(Clone, Debug)]
+#[derive(PartialEq)]
 pub struct Neuron {
     pub id: usize,
     pub membrane_potential: f64,
