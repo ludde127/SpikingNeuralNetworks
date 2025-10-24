@@ -1,8 +1,6 @@
 use crate::neuron::{Neuron, NeuronBehavior};
-use crate::spike_event::SpikeEvent;
 use crate::synapse::Synapse;
 use plotters::prelude::*;
-use std::collections::VecDeque;
 
 #[derive(Clone)]
 pub struct Network {
