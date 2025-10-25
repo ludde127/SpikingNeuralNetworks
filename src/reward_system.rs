@@ -3,11 +3,12 @@ use crate::datastructures::rolling_mean::RollingMeanF32;
 use crate::neuron::NeuronBehavior;
 use crate::synapse::{ChemicalSynapse, Synapse};
 use std::sync::{Arc, RwLock};
+use crate::datastructures::exponential_rolling_mean::EmaMeanF32;
 use crate::spike_event::SpikeEvent;
 
 pub struct RewardSystem {
     learning_rate: f32,
-    average_reward: RollingMeanF32,
+    average_reward: EmaMeanF32,
     last_reward: f32,
 }
 
@@ -15,7 +16,7 @@ impl RewardSystem {
     pub(crate) fn new() -> Self {
         RewardSystem {
             learning_rate: LEARNING_RATE,
-            average_reward: RollingMeanF32::new(REWARD_AVERAGE_DURATION), // This is global so we use a slower mean function than in synapses.
+            average_reward: EmaMeanF32::new(REWARD_AVERAGE_DURATION), // This is global so we use a slower mean function than in synapses.
             last_reward: 0.0,
         }
     }
@@ -33,6 +34,7 @@ impl RewardSystem {
         // We will iterate all the synapses so only send synapses which have been active lately.
         let average_reward = self.average_reward.get_mean(time).unwrap_or(0.0);
         let delta_reward = self.last_reward - average_reward;
+        if delta_reward == 0.0 {return}
 
         for spike_event in spike_events {
             // a_i(t) - a_i_avg(t)
@@ -45,10 +47,12 @@ impl RewardSystem {
                         - post_synaptic_neuron.ema_spike_average(time)
                 };
             let delta = self.learning_rate * post_synaptic_neuron_deviation * delta_reward;
-            synapse.write().unwrap().weight += delta;
+
+            let current_synapse_weight = synapse.read().unwrap().weight;
+            synapse.write().unwrap().weight = (current_synapse_weight + delta.clamp(-0.1, 0.1)).clamp(0.0, 1.0);
 
             // println debugging info
-            println!("delta {}, deviation {}, delta reward {}, last reward {}, average reward {}", delta, post_synaptic_neuron_deviation, delta_reward, self.last_reward, average_reward);
+            //println!("delta {}, deviation {}, delta reward {}, last reward {}, average reward {}", delta, post_synaptic_neuron_deviation, delta_reward, self.last_reward, average_reward);
         }
         self.last_reward = 0.0;
     }

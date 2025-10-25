@@ -25,10 +25,10 @@ impl Simulation {
             last_iteration_processes_spike_events: Vec::new(),
         }
     }
-    
+
     pub fn reward(&mut self, reward: f32) {
-        self.reward_system.update_synapses(self.time, &self.last_iteration_processes_spike_events);
         self.reward_system.add_reward(self.time, reward);
+        self.reward_system.update_synapses(self.time, &self.last_iteration_processes_spike_events);
         self.last_iteration_processes_spike_events = Vec::new();
     }
 
