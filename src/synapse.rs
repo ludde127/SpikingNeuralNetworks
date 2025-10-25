@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 use rand::Rng;
 use crate::constants::{MAX_SYNAPSE_DELAY_MS, MAX_SYNAPSE_WEIGHT, MIN_SYNAPSE_DELAY_MS, MIN_SYNAPSE_WEIGHT};
 use crate::neuron::Neuron;
+use crate::utils::get_clamped_normal;
 
 pub trait Synapse: Send + Sync {
     fn get_presynaptic_neuron(&self) -> Arc<RwLock<Neuron>>;
@@ -27,13 +28,12 @@ pub struct ChemicalSynapse {
 }
 
 impl ChemicalSynapse {
-    pub fn new(presynaptic_neuron: Arc<RwLock<Neuron>>, postsynaptic_neuron: Arc<RwLock<Neuron>>) -> Self {
-        let mut rng = rand::thread_rng();
+    pub fn new(presynaptic_neuron: Arc<RwLock<Neuron>>, postsynaptic_neuron: Arc<RwLock<Neuron>>, rng: &mut impl Rng) -> Self {
         ChemicalSynapse {
             presynaptic_neuron,
             postsynaptic_neuron,
-            weight: rng.gen_range(MIN_SYNAPSE_WEIGHT..MAX_SYNAPSE_WEIGHT),
-            delay: rng.gen_range(MIN_SYNAPSE_DELAY_MS..MAX_SYNAPSE_DELAY_MS),
+            weight: get_clamped_normal(MIN_SYNAPSE_WEIGHT, MAX_SYNAPSE_WEIGHT, rng),
+            delay: get_clamped_normal(MIN_SYNAPSE_DELAY_MS, MAX_SYNAPSE_DELAY_MS, rng),
         }
     }
 }

@@ -2,7 +2,8 @@ use crate::neuron::{Neuron, NeuronBehavior};
 use crate::synapse::{ChemicalSynapse, Synapse};
 use plotters::prelude::*;
 use std::sync::{Arc, RwLock};
-use crate::constants::MAX_NEURON_THRESHOLD;
+use crate::constants::{MAX_NEURON_THRESHOLD, MIN_NEURON_THRESHOLD};
+use crate::utils::get_clamped_normal;
 
 #[derive(Clone)]
 pub struct Network {
@@ -16,9 +17,10 @@ impl Network {
     }
 
     pub fn create_dense(num_neurons: usize) -> Self {
+        let mut rng = rand::thread_rng();
         let mut neurons = Vec::with_capacity(num_neurons);
         for i in 0..num_neurons {
-            neurons.push(Arc::new(RwLock::new(Neuron::new(MAX_NEURON_THRESHOLD, i))));
+            neurons.push(Arc::new(RwLock::new(Neuron::new(get_clamped_normal(MIN_NEURON_THRESHOLD, MAX_NEURON_THRESHOLD, &mut rng), i))));
         }
 
         let mut synapses = Vec::new();
@@ -28,6 +30,7 @@ impl Network {
                     let synapse = Arc::new(RwLock::new(ChemicalSynapse::new(
                         neurons.get(pre).unwrap().clone(),
                         neurons.get(post).unwrap().clone(),
+                        &mut rng
                     )));
                     neurons.get(pre).unwrap().write().unwrap().exiting_synapses.push(synapse.clone());
                     neurons.get(post).unwrap().write().unwrap().entering_synapses.push(synapse.clone());

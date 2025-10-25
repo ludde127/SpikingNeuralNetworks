@@ -9,10 +9,11 @@ mod neuron;
 mod spike_event;
 mod synapse;
 mod simulation;
+mod utils;
 
 fn main() {
     println!("Spiking Neural Network Simulation");
-    let network = Network::create_dense(10);
+    let network = Network::create_dense(100);
 
     let mut simulation = Simulation::new(1.0, vec![network.neurons[0].clone(), network.neurons[1].clone()]);
 
@@ -27,4 +28,5 @@ fn main() {
 
         simulation.step();
     }
+    network.plot_synapse_weights("synapse_weights.png").unwrap();
 }
