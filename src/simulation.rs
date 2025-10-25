@@ -1,14 +1,17 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use crate::neuron::{Neuron, NeuronBehavior};
+use crate::reward_system::RewardSystem;
 use crate::spike_event::SpikeEvent;
-use crate::synapse::Synapse;
+use crate::synapse::{ChemicalSynapse, Synapse};
 
 pub struct Simulation {
     spike_queue: VecDeque<Arc<RwLock<SpikeEvent>>>,
     dt: f32,
     pub time: f32,
     neurons_with_external_stimuli: Vec<Arc<RwLock<Neuron>>>,
+    reward_system: RewardSystem,
+    last_iteration_processes_spike_events : Vec<Arc<RwLock<SpikeEvent>>>
 }
 
 impl Simulation {
@@ -18,7 +21,15 @@ impl Simulation {
             dt,
             time: 0.0,
             neurons_with_external_stimuli: input_neurons,
+            reward_system: RewardSystem::new(),
+            last_iteration_processes_spike_events: Vec::new(),
         }
+    }
+    
+    pub fn reward(&mut self, reward: f32) {
+        self.reward_system.update_synapses(self.time, &self.last_iteration_processes_spike_events);
+        self.reward_system.add_reward(self.time, reward);
+        self.last_iteration_processes_spike_events = Vec::new();
     }
 
     fn send_action_potential(&mut self, neuron: Arc<RwLock<Neuron>>) {
@@ -60,6 +71,7 @@ impl Simulation {
 
     fn process_events(&mut self) {
         // May be roughly correct size
+        self.last_iteration_processes_spike_events = vec![];
         let mut new_firing_neurons = Vec::with_capacity(self.spike_queue.len() * 5);
         while let Some(event) = self.spike_queue.front() {
             let delivery_time = event.read().unwrap().delivery_time as f32;
@@ -71,9 +83,10 @@ impl Simulation {
                 let mut n = post_neuron.write().unwrap();
                 n.receive(wsyn.get_weight(), self.time);
 
-                if n.membrane_potential >= n.threshold {
+                if n.will_fire(delivery_time) {
                     // Neuron fired, create spike events
                     new_firing_neurons.push(post_neuron.clone());
+                    self.last_iteration_processes_spike_events.push(event)
                 }
             } else {
                 break;
