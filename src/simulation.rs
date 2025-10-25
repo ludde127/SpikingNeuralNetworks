@@ -44,7 +44,6 @@ impl Simulation {
             if fired {
                 // Neuron fired, create spike events
                 firing_neurons.push(neuron.clone());
-                println!("Neuron {} fired at time {}", neuron.read().unwrap().id, self.time);
             }
         }
         for neuron in firing_neurons {
@@ -56,7 +55,6 @@ impl Simulation {
         // Process external stimuli
         self.time += self.dt;
         self.step_process_nodes(self.neurons_with_external_stimuli.clone());
-        println!("Spike queue length: {}", self.spike_queue.len());
         self.process_events();
     }
 
@@ -65,7 +63,6 @@ impl Simulation {
         let mut new_firing_neurons = Vec::with_capacity(self.spike_queue.len() * 5);
         while let Some(event) = self.spike_queue.front() {
             let delivery_time = event.read().unwrap().delivery_time as f32;
-            println!("Delivery time: {}", delivery_time);
             if delivery_time <= self.time {
                 let event = self.spike_queue.pop_front().unwrap();
                 let synapse = event.read().unwrap().synapse.clone();
@@ -78,7 +75,6 @@ impl Simulation {
                     // Neuron fired, create spike events
                     new_firing_neurons.push(post_neuron.clone());
                 }
-                println!("Processed spike event to neuron {} at time {}", n.id, self.time);
             } else {
                 break;
             }
