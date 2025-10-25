@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 use rand::Rng;
-use crate::constants::{MAX_SYNAPSE_DELAY_MS, MIN_SYNAPSE_DELAY_MS};
+use crate::constants::{MAX_SYNAPSE_DELAY_MS, MAX_SYNAPSE_WEIGHT, MIN_SYNAPSE_DELAY_MS, MIN_SYNAPSE_WEIGHT};
 use crate::neuron::Neuron;
 
 pub trait Synapse: Send + Sync {
@@ -32,7 +32,7 @@ impl ChemicalSynapse {
         ChemicalSynapse {
             presynaptic_neuron,
             postsynaptic_neuron,
-            weight: rng.gen_range(0.0..1.0),
+            weight: rng.gen_range(MIN_SYNAPSE_WEIGHT..MAX_SYNAPSE_WEIGHT),
             delay: rng.gen_range(MIN_SYNAPSE_DELAY_MS..MAX_SYNAPSE_DELAY_MS),
         }
     }
