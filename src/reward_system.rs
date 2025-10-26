@@ -40,6 +40,12 @@ impl RewardSystem {
         for spike_event in spike_events {
             // a_i(t) - a_i_avg(t)
             let synapse = spike_event.read().unwrap().clone().synapse;
+
+            // --- This is the missing part ---
+            // 1. Get Presynaptic Activity: x_j(t)
+            let presynaptic_activity = {
+                synapse.read().unwrap().get_presynaptic_neuron().read().unwrap().ema_spike_average(time)
+            };
             let post_synaptic_neuron_deviation =
                 {
                     let read = synapse.read().unwrap();
@@ -47,7 +53,8 @@ impl RewardSystem {
                     post_synaptic_neuron.last_spike_magnitude()
                         - post_synaptic_neuron.ema_spike_average(time)
                 };
-            let delta = self.learning_rate * post_synaptic_neuron_deviation * delta_reward;
+            let delta = self.learning_rate * presynaptic_activity * post_synaptic_neuron_deviation * delta_reward;
+            //println!("Delta Reward: {}, Presynaptic Activity: {}, Post Synaptic Deviation: {}, Weight Change: {}", delta_reward, presynaptic_activity, post_synaptic_neuron_deviation, delta);
 
             let current_synapse_weight = synapse.read().unwrap().weight;
             synapse.write().unwrap().weight = (current_synapse_weight + delta).clamp(MIN_SYNAPSE_WEIGHT, MAX_SYNAPSE_WEIGHT);

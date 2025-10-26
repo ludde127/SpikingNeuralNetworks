@@ -78,7 +78,7 @@ impl NeuronBehavior for Neuron {
         // Update the neuron's state for the current time step
         if self.will_fire(time) {
             // Todo experiment with not using membrane potential but a 1, for boolean spike
-            self.ema_historical_spikes.add(self.membrane_potential, time);
+            self.ema_historical_spikes.add(time, self.membrane_potential);
             self.last_spike_magnitude = self.membrane_potential;
             self.time_of_last_fire = time;
             self.membrane_potential = 0.0; // Reset potential after firing
