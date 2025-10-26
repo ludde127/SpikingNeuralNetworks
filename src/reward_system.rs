@@ -44,14 +44,14 @@ impl RewardSystem {
             // --- This is the missing part ---
             // 1. Get Presynaptic Activity: x_j(t)
             let presynaptic_activity = {
-                synapse.read().unwrap().get_presynaptic_neuron().read().unwrap().ema_spike_average(time)
+                synapse.read().unwrap().get_presynaptic_neuron().read().unwrap().ema_firing_rate_average(time)
             };
             let post_synaptic_neuron_deviation =
                 {
                     let read = synapse.read().unwrap();
                     let post_synaptic_neuron = read.postsynaptic_neuron.read().unwrap();
                     post_synaptic_neuron.last_spike_magnitude()
-                        - post_synaptic_neuron.ema_spike_average(time)
+                        - post_synaptic_neuron.ema_activation_average(time)
                 };
             let delta = self.learning_rate * presynaptic_activity * post_synaptic_neuron_deviation * delta_reward;
             //println!("Delta Reward: {}, Presynaptic Activity: {}, Post Synaptic Deviation: {}, Weight Change: {}", delta_reward, presynaptic_activity, post_synaptic_neuron_deviation, delta);
