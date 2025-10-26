@@ -13,7 +13,7 @@ pub struct Simulation {
     pub time: f32,
     neurons: Vec<Arc<RwLock<Neuron>>>,
     reward_system: RewardSystem,
-    last_iteration_processes_spike_events: Vec<Arc<RwLock<SpikeEvent>>>,
+    current_trial_spike_events: Vec<Arc<RwLock<SpikeEvent>>>,
 }
 
 impl Simulation {
@@ -24,15 +24,15 @@ impl Simulation {
             time: 0.0,
             neurons: input_neurons,
             reward_system: RewardSystem::new(),
-            last_iteration_processes_spike_events: Vec::new(),
+            current_trial_spike_events: Vec::new(),
         }
     }
 
     pub fn reward(&mut self, reward: f32) {
         self.reward_system.add_reward(self.time, reward);
         self.reward_system
-            .update_synapses(self.time, &self.last_iteration_processes_spike_events);
-        self.last_iteration_processes_spike_events = Vec::new();
+            .update_synapses(self.time, &self.current_trial_spike_events);
+        self.current_trial_spike_events = Vec::new();
     }
 
     fn send_action_potential(&mut self, neuron: Arc<RwLock<Neuron>>) {
@@ -98,7 +98,6 @@ impl Simulation {
 
     fn process_events(&mut self) {
         // May be roughly correct size
-        self.last_iteration_processes_spike_events = vec![];
         let mut new_firing_neurons = Vec::with_capacity(self.spike_queue.len() * 5);
         while let Some(event) = self.spike_queue.front() {
             let delivery_time = event.read().unwrap().delivery_time as f32;
@@ -113,7 +112,7 @@ impl Simulation {
                 if n.will_fire(delivery_time) {
                     // Neuron fired, create spike events
                     new_firing_neurons.push(post_neuron.clone());
-                    self.last_iteration_processes_spike_events.push(event)
+                    self.current_trial_spike_events.push(event)
                 }
             } else {
                 break;

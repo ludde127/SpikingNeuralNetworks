@@ -8,5 +8,5 @@ pub const MIN_NEURON_DECAY_RATE: f32 = 0.002; // Minimum neuron decay rate
 pub const MAX_NEURON_DECAY_RATE: f32 = 0.05;
 pub const MIN_NEURON_THRESHOLD: f32 = 1.0; // Minimum neuron firing threshold
 pub const MAX_NEURON_THRESHOLD: f32 = 1.0; // Maximum neuron
-pub const REWARD_AVERAGE_DURATION: f32 = 50.0; // 20 ms
+pub const REWARD_AVERAGE_DURATION: f32 = 25.0; // 20 ms
 pub const LEARNING_RATE: f32 = 0.015;

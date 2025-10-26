@@ -63,7 +63,7 @@ fn plot_reward_over_time(
 fn main() {
     println!("Spiking Neural Network Simulation");
     let network = Network::create_dense(100);
-    let mut simulation = Simulation::new(1.0f32, network.neurons.clone());
+    let mut simulation = Simulation::new(1.0, network.neurons.clone());
     let mut rng = thread_rng();
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
@@ -73,7 +73,7 @@ fn main() {
     const OUTPUT_NEURON_IDX: usize = 9; // Target output
     const REWARD_MAGNITUDE: f32 = 1.0; // Changed to f32
 
-    const NUM_TRIALS: u32 = 20000;
+    const NUM_TRIALS: u32 = 2000;
     const TRIAL_WINDOW_STEPS: u32 = 25;
 
     println!("Starting simulation... Target: Neuron {} spikes for Input {}, not for Input {}.",
@@ -93,41 +93,46 @@ fn main() {
             (INPUT_NEURON_B_IDX, false)
         };
 
-        let mut last_spike_time_before_trial = {
+        // Get spike time *before* the trial starts
+        let last_spike_time_before_trial = {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire()
         };
 
-        let mut intra_trial_result = 0.0;
-
+        // --- This is the inner trial loop ---
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
             simulation.random_noise(-1.0, 1.0, 0.05);
             simulation.step();
-            let output_spiked_this_trial = {
-                let last_spike_time_after_trial = network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire();
-                let result = last_spike_time_after_trial > last_spike_time_before_trial;
-                last_spike_time_before_trial = last_spike_time_after_trial;
-                result
-            };
+            // DO NOT apply reward here
+        }
+        // --- End of inner trial loop ---
 
-            let reward: f32;
-            if is_go_signal {
-                if output_spiked_this_trial {
-                    reward = REWARD_MAGNITUDE;
-                } else {
-                    reward = -REWARD_MAGNITUDE;
-                }
+        // Now, check the *overall* outcome of the trial
+        let output_spiked_during_trial = {
+            network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire() > last_spike_time_before_trial
+        };
+
+        let reward: f32;
+        if is_go_signal {
+            if output_spiked_during_trial {
+                reward = REWARD_MAGNITUDE; // Correct: "Go" and it spiked
             } else {
-                if output_spiked_this_trial {
-                    reward = -REWARD_MAGNITUDE;
-                } else {
-                    reward = REWARD_MAGNITUDE;
-                }
+                reward = -REWARD_MAGNITUDE; // Correct: "Go" and it didn't spike
             }
-            simulation.reward(reward);
-            intra_trial_result = reward + intra_trial_result * 0.95;
+        } else { // is_no_go_signal
+            if output_spiked_during_trial {
+                reward = -REWARD_MAGNITUDE; // Correct: "No-Go" and it spiked
+            } else {
+                reward = REWARD_MAGNITUDE; // Correct: "No-Go" and it didn't spike
+            }
         }
 
+        // Apply the *single* reward for the *entire* trial
+        simulation.reward(reward);
+
+        // This intra-trial result tracking is fine, but it was just for logging.
+        // We'll use the final reward for logging.
+        let intra_trial_result = reward;
         all_trial_rewards.push(intra_trial_result);
         total_reward_batch += intra_trial_result;
 
