@@ -15,7 +15,7 @@ pub struct Neuron {
     pub entering_synapses: Vec<Arc<RwLock<ChemicalSynapse>>>,
     time_of_last_fire: f32,
     last_update_time: f32,
-    
+
     // Reward properties
     ema_historical_spikes: EmaMeanF32,
     last_spike_magnitude: f32,
@@ -92,12 +92,12 @@ impl NeuronBehavior for Neuron {
         let potential = self.get_potential(time);
         potential >= self.threshold
     }
-    
+
     fn time_of_last_fire(&self) -> f32 {
         self.time_of_last_fire
     }
     fn ema_spike_average(&self, time: f32) -> f32 {
-        self.ema_historical_spikes.get_mean(time).unwrap()
+        self.ema_historical_spikes.get_mean(time).unwrap_or(0.0)
     }
     fn last_spike_magnitude(&self) -> f32 {
         self.last_spike_magnitude

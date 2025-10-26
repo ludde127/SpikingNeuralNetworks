@@ -1,17 +1,19 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
 use crate::neuron::{Neuron, NeuronBehavior};
 use crate::reward_system::RewardSystem;
 use crate::spike_event::SpikeEvent;
 use crate::synapse::{ChemicalSynapse, Synapse};
+use graphviz_rust::print;
+use rand::Rng;
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
 
 pub struct Simulation {
     spike_queue: VecDeque<Arc<RwLock<SpikeEvent>>>,
     dt: f32,
     pub time: f32,
-    neurons_with_external_stimuli: Vec<Arc<RwLock<Neuron>>>,
+    neurons: Vec<Arc<RwLock<Neuron>>>,
     reward_system: RewardSystem,
-    last_iteration_processes_spike_events : Vec<Arc<RwLock<SpikeEvent>>>
+    last_iteration_processes_spike_events: Vec<Arc<RwLock<SpikeEvent>>>,
 }
 
 impl Simulation {
@@ -20,7 +22,7 @@ impl Simulation {
             spike_queue: VecDeque::new(),
             dt,
             time: 0.0,
-            neurons_with_external_stimuli: input_neurons,
+            neurons: input_neurons,
             reward_system: RewardSystem::new(),
             last_iteration_processes_spike_events: Vec::new(),
         }
@@ -28,7 +30,8 @@ impl Simulation {
 
     pub fn reward(&mut self, reward: f32) {
         self.reward_system.add_reward(self.time, reward);
-        self.reward_system.update_synapses(self.time, &self.last_iteration_processes_spike_events);
+        self.reward_system
+            .update_synapses(self.time, &self.last_iteration_processes_spike_events);
         self.last_iteration_processes_spike_events = Vec::new();
     }
 
@@ -47,7 +50,7 @@ impl Simulation {
 
     fn step_process_nodes(&mut self, neurons: Vec<Arc<RwLock<Neuron>>>) {
         let mut firing_neurons = Vec::with_capacity(neurons.len() * 5);
-        for neuron in &neurons{
+        for neuron in &neurons {
             let fired = {
                 let mut n = neuron.write().unwrap();
                 n.step(self.time)
@@ -62,10 +65,34 @@ impl Simulation {
         }
     }
 
+    pub fn input_external_stimuli(&mut self, node: Arc<RwLock<Neuron>>, magnitude: f32) {
+        node.write().unwrap().receive(magnitude, self.time);
+        self.step_process_nodes(vec![node]);
+    }
+
+    pub fn random_noise(&mut self, min: f32, max: f32, percent: f32) {
+        // Adds random noise to a percentage of neurons
+        let mut rng = rand::thread_rng();
+        let num_neurons = (self.neurons.len() as f32 * percent).ceil() as usize;
+        let mut selected_indices = Vec::with_capacity(num_neurons);
+        let mut modified_neurons = Vec::with_capacity(num_neurons);
+        while selected_indices.len() < num_neurons {
+            let idx = rng.gen_range(0..self.neurons.len());
+            if !selected_indices.contains(&idx) {
+                selected_indices.push(idx);
+                self.neurons[idx]
+                    .write()
+                    .unwrap()
+                    .receive(rng.gen_range(min..max), self.time);
+                modified_neurons.push(self.neurons[idx].clone());
+            }
+        }
+        self.step_process_nodes(modified_neurons);
+    }
+
     pub(crate) fn step(&mut self) {
         // Process external stimuli
         self.time += self.dt;
-        self.step_process_nodes(self.neurons_with_external_stimuli.clone());
         self.process_events();
     }
 
@@ -97,4 +124,3 @@ impl Simulation {
         self.step_process_nodes(new_firing_neurons);
     }
 }
-

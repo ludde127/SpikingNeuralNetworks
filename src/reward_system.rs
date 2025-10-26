@@ -1,8 +1,9 @@
-use crate::constants::{LEARNING_RATE, REWARD_AVERAGE_DURATION};
+use crate::constants::{LEARNING_RATE, MAX_SYNAPSE_WEIGHT, MIN_SYNAPSE_WEIGHT, REWARD_AVERAGE_DURATION};
 use crate::datastructures::rolling_mean::RollingMeanF32;
 use crate::neuron::NeuronBehavior;
 use crate::synapse::{ChemicalSynapse, Synapse};
 use std::sync::{Arc, RwLock};
+use graphviz_rust::print;
 use crate::datastructures::exponential_rolling_mean::EmaMeanF32;
 use crate::spike_event::SpikeEvent;
 
@@ -49,10 +50,7 @@ impl RewardSystem {
             let delta = self.learning_rate * post_synaptic_neuron_deviation * delta_reward;
 
             let current_synapse_weight = synapse.read().unwrap().weight;
-            synapse.write().unwrap().weight = (current_synapse_weight + delta.clamp(-0.1, 0.1)).clamp(0.0, 1.0);
-
-            // println debugging info
-            //println!("delta {}, deviation {}, delta reward {}, last reward {}, average reward {}", delta, post_synaptic_neuron_deviation, delta_reward, self.last_reward, average_reward);
+            synapse.write().unwrap().weight = (current_synapse_weight + delta).clamp(MIN_SYNAPSE_WEIGHT, MAX_SYNAPSE_WEIGHT);
         }
         self.last_reward = 0.0;
     }
