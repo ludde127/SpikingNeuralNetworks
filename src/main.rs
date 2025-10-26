@@ -1,4 +1,5 @@
 use rand::{thread_rng, Rng};
+use plotters::prelude::*; // Added for reward plotting
 use crate::network::{Network, VisualizeNetwork};
 use crate::neuron::NeuronBehavior;
 use crate::simulation::Simulation;
@@ -14,26 +15,162 @@ mod utils;
 mod reward_system;
 mod datastructures;
 
+/// Plots a 1D vector of f32 data as a line chart.
+fn plot_reward_over_time(
+    data: &[f32],
+    path: &str,
+    title: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if data.is_empty() {
+        println!("No reward data to plot.");
+        return Ok(());
+    }
+
+    let root = BitMapBackend::new(path, (1024, 768)).into_drawing_area();
+    root.fill(&WHITE)?;
+
+    // Find min and max reward for y-axis
+    let max_val = data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let min_val = data.iter().cloned().fold(f32::INFINITY, f32::min);
+
+    // Add some padding, but cap at reward limits
+    let y_max = (max_val + 0.2).min(1.0);
+    let y_min = (min_val - 0.2).max(-1.0);
+
+    let mut chart = ChartBuilder::on(&root)
+        .caption(title, ("sans-serif", 40).into_font())
+        .margin(10)
+        .x_label_area_size(40)
+        .y_label_area_size(40)
+        .build_cartesian_2d(0..data.len(), y_min..y_max)?;
+
+    chart.configure_mesh()
+        .x_desc("Trial Batch")
+        .y_desc("Average Reward")
+        .draw()?;
+
+    chart.draw_series(LineSeries::new(
+        data.iter().enumerate().map(|(x, y)| (x, *y)),
+        &BLUE
+    ))?;
+
+    root.present()?;
+    println!("Reward plot saved to {}", path);
+    Ok(())
+}
+
+
 fn main() {
     println!("Spiking Neural Network Simulation");
     let network = Network::create_dense(100);
-
-    let mut simulation = Simulation::new(1.0, vec![network.neurons[0].clone(), network.neurons[1].clone()]);
+    let mut simulation = Simulation::new(1.0f32, network.neurons.clone());
     let mut rng = thread_rng();
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
-    // Create random poisson spike trains for input neurons
-    for _ in 0..100 {
-        {
-            network.neurons[0].write().unwrap().receive(
-                1.0,
-                simulation.time,
-            );
+
+    const INPUT_NEURON_A_IDX: usize = 0; // "Go" signal
+    const INPUT_NEURON_B_IDX: usize = 1; // "No-Go" signal
+    const OUTPUT_NEURON_IDX: usize = 9; // Target output
+    const REWARD_MAGNITUDE: f32 = 1.0; // Changed to f32
+
+    const NUM_TRIALS: u32 = 20000;
+    const TRIAL_WINDOW_STEPS: u32 = 25;
+
+    println!("Starting simulation... Target: Neuron {} spikes for Input {}, not for Input {}.",
+             OUTPUT_NEURON_IDX, INPUT_NEURON_A_IDX, INPUT_NEURON_B_IDX);
+    println!("Running {} trials, each with a {}-step response window.", NUM_TRIALS, TRIAL_WINDOW_STEPS);
+
+
+    let mut total_reward_batch = 0.0f32;
+    let mut all_trial_rewards: Vec<f32> = Vec::new();
+    let mut batch_avg_rewards: Vec<f32> = Vec::new();
+    const BATCH_SIZE: u32 = 50;
+
+    for trial in 0..NUM_TRIALS {
+        let (input_idx, is_go_signal) = if rng.gen_bool(0.5) {
+            (INPUT_NEURON_A_IDX, true)
+        } else {
+            (INPUT_NEURON_B_IDX, false)
+        };
+
+        let mut last_spike_time_before_trial = {
+            network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire()
+        };
+
+        let mut intra_trial_result = 0.0;
+
+        for _ in 0..TRIAL_WINDOW_STEPS {
+            simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
+            simulation.random_noise(-1.0, 1.0, 0.05);
+            simulation.step();
+            let output_spiked_this_trial = {
+                let last_spike_time_after_trial = network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire();
+                let result = last_spike_time_after_trial > last_spike_time_before_trial;
+                last_spike_time_before_trial = last_spike_time_after_trial;
+                result
+            };
+
+            let reward: f32;
+            if is_go_signal {
+                if output_spiked_this_trial {
+                    reward = REWARD_MAGNITUDE;
+                } else {
+                    reward = -REWARD_MAGNITUDE;
+                }
+            } else {
+                if output_spiked_this_trial {
+                    reward = -REWARD_MAGNITUDE;
+                } else {
+                    reward = REWARD_MAGNITUDE;
+                }
+            }
+            simulation.reward(reward);
+            intra_trial_result = reward + intra_trial_result * 0.95;
         }
 
-        simulation.step();
-        simulation.reward(rng.gen_range(-1.0..1.0));
-        
+        all_trial_rewards.push(intra_trial_result);
+        total_reward_batch += intra_trial_result;
+
+        if (trial + 1) % BATCH_SIZE == 0 {
+            let avg_reward = total_reward_batch / (BATCH_SIZE as f32);
+            println!("Trials {}-{}: Average Reward = {:.2}", trial + 1 - BATCH_SIZE, trial + 1, avg_reward);
+            batch_avg_rewards.push(avg_reward);
+            total_reward_batch = 0.0f32;
+        }
     }
+
+    println!("Simulation finished.");
+
+    if let Err(e) = plot_reward_over_time(
+        &batch_avg_rewards,
+        "reward_over_time.png",
+        "Average Reward per Batch",
+    ) {
+        eprintln!("Error plotting reward: {}", e);
+    }
+    // ---
+
+    // Calculate and print moving average of rewards
+    let moving_avg_window = 100; // This is 100 *trials*, not batches
+    if all_trial_rewards.len() > moving_avg_window {
+        println!("Moving average of reward (window={}):", moving_avg_window);
+        let moving_averages: Vec<f32> = all_trial_rewards // Changed to f32
+            .windows(moving_avg_window)
+            .map(|w| w.iter().sum::<f32>() / (moving_avg_window as f32)) // Changed to f32
+            .collect();
+
+        // Print a subset of moving averages to avoid flooding console
+        for (i, avg) in moving_averages.iter().enumerate().step_by(moving_avg_window) {
+            println!("  Trials {}-{}: {:.2}", i, i + moving_avg_window, avg);
+        }
+    }
+
     network.plot_synapse_weights("synapse_weights_end.png").unwrap();
+
+    println!("\nCheck synapse_weights_start.png, synapse_weights_end.png, and reward_over_time.png.");
+    println!("If learning occurred, you should see a rising trend in the average rewards.");
+    println!("The weights plot might show stronger connections from {} -> {}", INPUT_NEURON_A_IDX, OUTPUT_NEURON_IDX);
+    println!("and weaker (or inhibitory) connections from {} -> {}", INPUT_NEURON_B_IDX, OUTPUT_NEURON_IDX);
 }
+
+
