@@ -39,10 +39,9 @@ impl Simulation {
         let n = neuron.read().unwrap();
         for syn in &n.exiting_synapses {
             let wsyn = syn.write().unwrap();
-            let delivery_time = self.time + wsyn.delay;
             let spike_event = Arc::new(RwLock::new(SpikeEvent {
                 synapse: syn.clone(),
-                delivery_time: delivery_time as usize,
+                delivery_time: self.time + wsyn.delay,
             }));
             self.spike_queue.push_back(spike_event);
         }

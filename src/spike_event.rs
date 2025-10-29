@@ -5,7 +5,13 @@ use std::sync::{Arc, RwLock};
 #[derive(Debug, Clone)]
 pub struct SpikeEvent {
     pub synapse: Arc<RwLock<ChemicalSynapse>>,
-    pub delivery_time: usize,
+    pub delivery_time: f32,
+}
+
+impl SpikeEvent {
+    pub fn pre_synaptic_neuron_spike_time(&self) -> f32 {
+        self.delivery_time - self.synapse.read().unwrap().delay
+    }
 }
 
 impl PartialEq for SpikeEvent {
