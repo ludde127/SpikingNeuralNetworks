@@ -1,9 +1,7 @@
 use crate::constants::{LEARNING_RATE, MAX_SYNAPSE_WEIGHT, MIN_SYNAPSE_WEIGHT, REWARD_AVERAGE_DURATION};
-use crate::datastructures::rolling_mean::RollingMeanF32;
 use crate::neuron::NeuronBehavior;
-use crate::synapse::{ChemicalSynapse, Synapse};
+use crate::synapse::{Synapse};
 use std::sync::{Arc, RwLock};
-use graphviz_rust::print;
 use crate::datastructures::exponential_rolling_mean::EmaMeanF32;
 use crate::spike_event::SpikeEvent;
 
