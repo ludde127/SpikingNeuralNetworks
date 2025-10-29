@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 pub struct SpikeEvent {
     pub synapse: Arc<RwLock<ChemicalSynapse>>,
     pub delivery_time: f32,
+    pub presynaptic_ema_firing_rate_before_spike: f32,
 }
 
 impl SpikeEvent {

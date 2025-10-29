@@ -1,5 +1,7 @@
-use rand::{thread_rng, Rng};
-use plotters::prelude::*; // Added for reward plotting
+use rand::{thread_rng, Rng, SeedableRng};
+use plotters::prelude::*;
+use rand::rngs::StdRng;
+// Added for reward plotting
 use crate::network::{Network, VisualizeNetwork};
 use crate::neuron::NeuronBehavior;
 use crate::simulation::Simulation;
@@ -62,9 +64,9 @@ fn plot_reward_over_time(
 
 fn main() {
     println!("Spiking Neural Network Simulation");
-    let network = Network::create_dense(100);
+    let mut rng = StdRng::seed_from_u64(42);
+    let network = Network::create_dense(50, &mut rng);
     let mut simulation = Simulation::new(1.0, network.neurons.clone());
-    let mut rng = thread_rng();
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
 
@@ -73,7 +75,7 @@ fn main() {
     const OUTPUT_NEURON_IDX: usize = 9; // Target output
     const REWARD_MAGNITUDE: f32 = 1.0; // Changed to f32
 
-    const NUM_TRIALS: u32 = 2000;
+    const NUM_TRIALS: u32 = 20_000;
     const TRIAL_WINDOW_STEPS: u32 = 25;
 
     println!("Starting simulation... Target: Neuron {} spikes for Input {}, not for Input {}.",
@@ -101,7 +103,7 @@ fn main() {
         // --- This is the inner trial loop ---
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
-            simulation.random_noise(-1.0, 1.0, 0.2);
+            //simulation.random_noise(-1.0, 1.0, 0.01);
             simulation.step();
             // DO NOT apply reward here
         }
@@ -111,7 +113,7 @@ fn main() {
         let output_spiked_during_trial = {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire() > last_spike_time_before_trial
         };
-        println!("Output spiked during trial: {}", output_spiked_during_trial);
+        //println!("Output spiked during trial: {}", output_spiked_during_trial);
 
         let reward: f32;
         if is_go_signal {

@@ -30,6 +30,9 @@ impl Simulation {
 
     pub fn reward(&mut self, reward: f32) {
         self.reward_system.add_reward(self.time, reward);
+        if self.current_trial_spike_events.is_empty() {
+            return;
+        }
         self.reward_system
             .update_synapses(self.time, &self.current_trial_spike_events);
         self.current_trial_spike_events = Vec::new();
@@ -42,6 +45,7 @@ impl Simulation {
             let spike_event = Arc::new(RwLock::new(SpikeEvent {
                 synapse: syn.clone(),
                 delivery_time: self.time + wsyn.delay,
+                presynaptic_ema_firing_rate_before_spike: neuron.read().unwrap().ema_firing_rate_before_last_spike
             }));
             self.spike_queue.push_back(spike_event);
         }
@@ -69,9 +73,8 @@ impl Simulation {
         self.step_process_nodes(vec![node]);
     }
 
-    pub fn random_noise(&mut self, min: f32, max: f32, percent: f32) {
+    pub fn random_noise(&mut self, min: f32, max: f32, percent: f32, rng: &mut impl Rng) {
         // Adds random noise to a percentage of neurons
-        let mut rng = rand::thread_rng();
         let num_neurons = (self.neurons.len() as f32 * percent).ceil() as usize;
         let mut selected_indices = Vec::with_capacity(num_neurons);
         let mut modified_neurons = Vec::with_capacity(num_neurons);

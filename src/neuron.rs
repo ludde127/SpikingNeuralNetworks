@@ -1,8 +1,13 @@
 use std::sync::{Arc, RwLock};
 use crate::constants::{MAX_NEURON_DECAY_RATE, MAX_REFRACTORY_PERIOD_MS, MIN_NEURON_DECAY_RATE, MIN_REFRACTORY_PERIOD_MS, REWARD_AVERAGE_DURATION};
-use rand::Rng;
 use crate::datastructures::exponential_rolling_mean::EmaMeanF32;
 use crate::synapse::ChemicalSynapse;
+
+#[derive(Clone, Debug)]
+pub struct SpikeTime {
+    time: f32,
+    pub membrane_potential_at_spike: f32,
+}
 
 #[derive(Clone, Debug)]
 pub struct Neuron {
@@ -17,9 +22,10 @@ pub struct Neuron {
     last_update_time: f32,
 
     // Reward properties
-    last_spike_magnitude: f32,
     ema_activation: EmaMeanF32,
-    ema_firing_rate: EmaMeanF32
+    ema_firing_rate: EmaMeanF32,
+    last_spike_times: Vec<SpikeTime>,
+    pub ema_firing_rate_before_last_spike: f32,
 }
 
 pub trait NeuronBehavior {
@@ -33,26 +39,30 @@ pub trait NeuronBehavior {
     fn ema_activation_average(&self, time: f32) -> f32;
     fn ema_firing_rate_average(&self, time: f32) -> f32;
     fn last_spike_magnitude(&self) -> f32;
+    fn first_spike_after(&self, time: f32) -> Option<&SpikeTime>;
 }
+
+const LAST_SPIKE_STORAGE_SIZE: usize = 10;
+
 
 impl NeuronBehavior for Neuron {
     /// Constructor to create a new neuron.
     fn new(threshold: f32, id: usize) -> Self {
         // Create random generator
-        let mut rng = rand::thread_rng();
         Neuron {
             id,
             membrane_potential: 0.0,
             threshold,
-            refractory_period: rng.gen_range(MIN_REFRACTORY_PERIOD_MS..MAX_REFRACTORY_PERIOD_MS),
+            refractory_period: MIN_REFRACTORY_PERIOD_MS, //rng.gen_range(MIN_REFRACTORY_PERIOD_MS..MAX_REFRACTORY_PERIOD_MS),
             time_of_last_fire: -f32::INFINITY,
             exiting_synapses: Vec::new(),
             entering_synapses: Vec::new(),
             last_update_time: 0.0,
-            decay_rate: rng.gen_range(MIN_NEURON_DECAY_RATE..MAX_NEURON_DECAY_RATE),
+            decay_rate: MIN_NEURON_DECAY_RATE, // rng.gen_range(MIN_NEURON_DECAY_RATE..MAX_NEURON_DECAY_RATE),
             ema_activation: EmaMeanF32::new(REWARD_AVERAGE_DURATION),
             ema_firing_rate: EmaMeanF32::new(REWARD_AVERAGE_DURATION),
-            last_spike_magnitude: 0.0,
+            last_spike_times: vec![],
+            ema_firing_rate_before_last_spike: 0.0,
         }
     }
 
@@ -80,11 +90,19 @@ impl NeuronBehavior for Neuron {
     fn step(&mut self, time: f32) -> bool {
         if self.will_fire(time) {
             self.ema_activation.add(time, self.membrane_potential);
+            self.ema_firing_rate_before_last_spike = self.ema_firing_rate.get_mean(time).unwrap_or(0.0);
 
             // 2. Add to firing rate (spike) EMA. We add 1.0 to represent one spike.
             self.ema_firing_rate.add(time, 1.0);
 
-            self.last_spike_magnitude = self.membrane_potential;
+            if self.last_spike_times.len() >= LAST_SPIKE_STORAGE_SIZE {
+                self.last_spike_times.remove(0);
+            }
+            self.last_spike_times.push(SpikeTime {
+                time,
+                membrane_potential_at_spike: self.membrane_potential,
+            });
+
             self.time_of_last_fire = time;
             self.membrane_potential = 0.0; // Reset potential after firing
             true
@@ -104,7 +122,11 @@ impl NeuronBehavior for Neuron {
         self.time_of_last_fire
     }
     fn last_spike_magnitude(&self) -> f32 {
-        self.last_spike_magnitude
+        if let Some(last_spike) = self.last_spike_times.last() {
+            last_spike.membrane_potential_at_spike
+        } else {
+            0.0
+        }
     }
     fn ema_activation_average(&self, time: f32) -> f32 {
         self.ema_activation.get_mean(time).unwrap_or(0.0)
@@ -112,5 +134,14 @@ impl NeuronBehavior for Neuron {
 
     fn ema_firing_rate_average(&self, time: f32) -> f32 {
         self.ema_firing_rate.get_mean(time).unwrap_or(0.0)
+    }
+
+    fn first_spike_after(&self, time: f32) -> Option<&SpikeTime> {
+        for spike in &self.last_spike_times {
+            if spike.time >= time {
+                return Some(spike);
+            }
+        }
+        None
     }
 }
