@@ -101,7 +101,7 @@ fn main() {
         // --- This is the inner trial loop ---
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
-            simulation.random_noise(-1.0, 1.0, 0.05);
+            simulation.random_noise(-1.0, 1.0, 0.2);
             simulation.step();
             // DO NOT apply reward here
         }
@@ -111,6 +111,7 @@ fn main() {
         let output_spiked_during_trial = {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire() > last_spike_time_before_trial
         };
+        println!("Output spiked during trial: {}", output_spiked_during_trial);
 
         let reward: f32;
         if is_go_signal {

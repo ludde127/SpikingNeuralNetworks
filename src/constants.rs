@@ -1,12 +1,12 @@
 pub const MIN_SYNAPSE_DELAY_MS: f32 = 1.0; // Minimum synapse delay in ms
-pub const MAX_SYNAPSE_DELAY_MS: f32 = 5.0; // Maximum synapse delay in ms
+pub const MAX_SYNAPSE_DELAY_MS: f32 = 2.0; // Maximum synapse delay in ms
 pub const MIN_SYNAPSE_WEIGHT: f32 = -1.0;
 pub const MAX_SYNAPSE_WEIGHT: f32 = 1.0;
-pub const MIN_REFRACTORY_PERIOD_MS: f32 = 1.0; // Minimum neuron refractory period in ms
+pub const MIN_REFRACTORY_PERIOD_MS: f32 = 5.0; // Minimum neuron refractory period in ms
 pub const MAX_REFRACTORY_PERIOD_MS: f32 = 10.0; //
 pub const MIN_NEURON_DECAY_RATE: f32 = 0.002; // Minimum neuron decay rate
 pub const MAX_NEURON_DECAY_RATE: f32 = 0.05;
 pub const MIN_NEURON_THRESHOLD: f32 = 1.0; // Minimum neuron firing threshold
 pub const MAX_NEURON_THRESHOLD: f32 = 1.0; // Maximum neuron
 pub const REWARD_AVERAGE_DURATION: f32 = 25.0; // 20 ms
-pub const LEARNING_RATE: f32 = 0.015;
+pub const LEARNING_RATE: f32 = 0.01;
