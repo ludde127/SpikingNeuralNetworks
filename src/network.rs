@@ -1,10 +1,10 @@
+use crate::constants::{MAX_NEURON_THRESHOLD, MIN_NEURON_THRESHOLD};
 use crate::neuron::{Neuron, NeuronBehavior};
 use crate::synapse::{ChemicalSynapse, Synapse};
-use plotters::prelude::*;
-use std::sync::{Arc, RwLock};
-use rand::Rng;
-use crate::constants::{MAX_NEURON_THRESHOLD, MIN_NEURON_THRESHOLD};
 use crate::utils::get_clamped_normal;
+use plotters::prelude::*;
+use rand::Rng;
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub struct Network {
@@ -13,14 +13,20 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(neurons: Vec<Arc<RwLock<Neuron>>>, synapses: Vec<Arc<RwLock<ChemicalSynapse>>>) -> Self {
+    pub fn new(
+        neurons: Vec<Arc<RwLock<Neuron>>>,
+        synapses: Vec<Arc<RwLock<ChemicalSynapse>>>,
+    ) -> Self {
         Network { neurons, synapses }
     }
 
     pub fn create_dense(num_neurons: usize, rng: &mut impl Rng) -> Self {
         let mut neurons = Vec::with_capacity(num_neurons);
         for i in 0..num_neurons {
-            neurons.push(Arc::new(RwLock::new(Neuron::new(get_clamped_normal(MIN_NEURON_THRESHOLD, MAX_NEURON_THRESHOLD, rng), i))));
+            neurons.push(Arc::new(RwLock::new(Neuron::new(
+                get_clamped_normal(MIN_NEURON_THRESHOLD, MAX_NEURON_THRESHOLD, rng),
+                i,
+            ))));
         }
 
         let mut synapses = Vec::new();
@@ -30,10 +36,22 @@ impl Network {
                     let synapse = Arc::new(RwLock::new(ChemicalSynapse::new(
                         neurons.get(pre).unwrap().clone(),
                         neurons.get(post).unwrap().clone(),
-                        rng
+                        rng,
                     )));
-                    neurons.get(pre).unwrap().write().unwrap().exiting_synapses.push(synapse.clone());
-                    neurons.get(post).unwrap().write().unwrap().entering_synapses.push(synapse.clone());
+                    neurons
+                        .get(pre)
+                        .unwrap()
+                        .write()
+                        .unwrap()
+                        .exiting_synapses
+                        .push(synapse.clone());
+                    neurons
+                        .get(post)
+                        .unwrap()
+                        .write()
+                        .unwrap()
+                        .entering_synapses
+                        .push(synapse.clone());
                     synapses.push(synapse);
                 }
             }
@@ -81,13 +99,42 @@ impl VisualizeNetwork for Network {
             "Synapse weights: min={:.4}, max={:.4}, avg={:.4}",
             min_w, max_w, avg_w
         );
+
+        // If it has less than 10 neurons create a connectivity matrix
+        if self.neurons.len() <= 10 {
+            println!("Connectivity Matrix:");
+            let n = self.neurons.len();
+            let mut matrix = vec![vec![0.0; n]; n];
+            for synapse in &self.synapses {
+                let s = synapse.read().unwrap();
+                let pre_id = s.get_presynaptic_neuron().read().unwrap().id;
+                let post_id = s.get_postsynaptic_neuron().read().unwrap().id;
+                matrix[pre_id][post_id] = s.weight;
+            }
+            // Add headers
+            println!("Columns are Post-synaptic Neurons, Rows are Pre-synaptic Neurons");
+            for i in 0..n {
+                print!("{:>5} ", i);
+            }
+            println!();
+            for row in matrix {
+                for val in row {
+                    print!("{:>5.2} ", val);
+                }
+                println!();
+            }
+        }
     }
 
     fn plot_synapse_weights(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let root = BitMapBackend::new(path, (1024, 768)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let weights: Vec<f32> = self.synapses.iter().map(|s| s.read().unwrap().get_weight()).collect();
+        let weights: Vec<f32> = self
+            .synapses
+            .iter()
+            .map(|s| s.read().unwrap().get_weight())
+            .collect();
         if weights.is_empty() {
             return Ok(());
         }

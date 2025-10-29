@@ -34,7 +34,7 @@ impl RewardSystem {
         // We will iterate all the synapses so only send synapses which have been active lately.
         let average_reward = self.average_reward.get_mean(time).unwrap_or(0.0);
         let delta_reward = self.last_reward - average_reward;
-        if delta_reward == 0.0 {return}
+        if delta_reward.abs() < 0.01 {return}
 
         let mut delta_sum = 0.0;
         for spike_event in spike_events {

@@ -64,15 +64,16 @@ fn plot_reward_over_time(
 
 fn main() {
     println!("Spiking Neural Network Simulation");
-    let mut rng = StdRng::seed_from_u64(42);
-    let network = Network::create_dense(50, &mut rng);
+    //let mut rng = StdRng::seed_from_u64(42); // Fixed seed for reproducibility
+    let mut rng = thread_rng(); // Non-deterministic seed for variability
+    let network = Network::create_dense(100, &mut rng);
     let mut simulation = Simulation::new(1.0, network.neurons.clone());
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
 
     const INPUT_NEURON_A_IDX: usize = 0; // "Go" signal
     const INPUT_NEURON_B_IDX: usize = 1; // "No-Go" signal
-    const OUTPUT_NEURON_IDX: usize = 9; // Target output
+    const OUTPUT_NEURON_IDX: usize = 2; // Target output
     const REWARD_MAGNITUDE: f32 = 1.0; // Changed to f32
 
     const NUM_TRIALS: u32 = 20_000;
@@ -100,10 +101,15 @@ fn main() {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire()
         };
 
+        // pct_rand should decrease exponentially over trials
+        let pct_rand = (-0.3 * (trial as f32)).exp();
+
         // --- This is the inner trial loop ---
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
-            //simulation.random_noise(-1.0, 1.0, 0.01);
+            if pct_rand > 0.0001 {
+                simulation.random_noise(-pct_rand, pct_rand, pct_rand, &mut rng);
+            }
             simulation.step();
             // DO NOT apply reward here
         }
@@ -118,7 +124,7 @@ fn main() {
         let reward: f32;
         if is_go_signal {
             if output_spiked_during_trial {
-                reward = REWARD_MAGNITUDE; // Correct: "Go" and it spiked
+                reward = REWARD_MAGNITUDE * 5.0; // Correct: "Go" and it spiked
             } else {
                 reward = -REWARD_MAGNITUDE; // Correct: "Go" and it didn't spike
             }
@@ -174,6 +180,7 @@ fn main() {
     }
 
     network.plot_synapse_weights("synapse_weights_end.png").unwrap();
+    network.describe();
 
     println!("\nCheck synapse_weights_start.png, synapse_weights_end.png, and reward_over_time.png.");
     println!("If learning occurred, you should see a rising trend in the average rewards.");
