@@ -138,7 +138,7 @@ fn plot_two_series_over_time(
 fn main() {
     println!("Spiking Neural Network Simulation");
     let mut rng = thread_rng(); // Non-deterministic seed for variability
-    let mut network = Network::create_dense(100, &mut rng);
+    let mut network = Network::create_dense(1000, &mut rng);
     let mut simulation = Simulation::new(1.0, network.neurons.clone());
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
@@ -148,8 +148,8 @@ fn main() {
     const OUTPUT_NEURON_IDX: usize = 2; // Target output
     const REWARD_MAGNITUDE: f32 = 1.0; // Changed to f32
 
-    const NUM_TRIALS: u32 = 20_000;
-    const TRIAL_WINDOW_STEPS: u32 = 25;
+    const NUM_TRIALS: u32 = 10_000;
+    const TRIAL_WINDOW_STEPS: u32 = 50;
 
     println!("Starting simulation... Target: Neuron {} spikes for Input {}, not for Input {}.",
              OUTPUT_NEURON_IDX, INPUT_NEURON_A_IDX, INPUT_NEURON_B_IDX);
@@ -175,23 +175,11 @@ fn main() {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire()
         };
 
-        // pct_rand should decrease exponentially over trials
-        let _pct_rand = (-0.3 * (trial as f32)).exp();
-
-        // --- This is the inner trial loop ---
         simulation.step();
-        //simulation.random_noise(0.0, 1.0, 1.0, &mut rng);
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
-            //if pct_rand > 0.0001 {
-            //    simulation.random_noise(-pct_rand*5.0, pct_rand*5.0, pct_rand, &mut rng);
-            //}
             simulation.step();
-            // DO NOT apply reward here
         }
-        // --- End of inner trial loop ---
-
-        // Now, check the *overall* outcome of the trial
         println!("Evaluating trial {}: Input Neuron {}, Go Signal: {}, Started at {}", trial + 1, input_idx, is_go_signal, last_spike_time_before_trial);
 
         for fire in network.neurons[OUTPUT_NEURON_IDX].read().unwrap().last_spike_times.iter().filter(|p| p.time > last_spike_time_before_trial) {
@@ -201,7 +189,6 @@ fn main() {
         let output_spiked_during_trial = {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire() > last_spike_time_before_trial
         };
-        //println!("Output spiked during trial: {}", output_spiked_during_trial);
 
         let reward: f32;
         if is_go_signal {
