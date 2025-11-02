@@ -1,3 +1,4 @@
+use graphviz_rust::print;
 use rand::{thread_rng, Rng, SeedableRng};
 use plotters::prelude::*;
 use rand::rngs::StdRng;
@@ -64,9 +65,9 @@ fn plot_reward_over_time(
 
 fn main() {
     println!("Spiking Neural Network Simulation");
-    //let mut rng = StdRng::seed_from_u64(42); // Fixed seed for reproducibility
+    let mut rng = StdRng::seed_from_u64(42); // Fixed seed for reproducibility
     let mut rng = thread_rng(); // Non-deterministic seed for variability
-    let network = Network::create_dense(100, &mut rng);
+    let mut network = Network::create_dense(3, &mut rng);
     let mut simulation = Simulation::new(1.0, network.neurons.clone());
 
     network.plot_synapse_weights("synapse_weights_start.png").unwrap();
@@ -105,6 +106,8 @@ fn main() {
         let pct_rand = (-0.3 * (trial as f32)).exp();
 
         // --- This is the inner trial loop ---
+        simulation.step();
+        //simulation.random_noise(0.0, 1.0, 1.0, &mut rng);
         for _ in 0..TRIAL_WINDOW_STEPS {
             simulation.input_external_stimuli(network.neurons[input_idx].clone(), 1.0);
             if pct_rand > 0.0001 {
@@ -116,6 +119,12 @@ fn main() {
         // --- End of inner trial loop ---
 
         // Now, check the *overall* outcome of the trial
+        println!("Evaluating trial {}: Input Neuron {}, Go Signal: {}, Started at {}", trial + 1, input_idx, is_go_signal, last_spike_time_before_trial);
+
+        for fire in network.neurons[OUTPUT_NEURON_IDX].read().unwrap().last_spike_times.iter().filter(|p| p.time > last_spike_time_before_trial) {
+            println!("  Output neuron spike at time {:.2} ms, strength: {}", fire.time, fire.membrane_potential_at_spike);
+        }
+
         let output_spiked_during_trial = {
             network.neurons[OUTPUT_NEURON_IDX].read().unwrap().time_of_last_fire() > last_spike_time_before_trial
         };
@@ -124,7 +133,7 @@ fn main() {
         let reward: f32;
         if is_go_signal {
             if output_spiked_during_trial {
-                reward = REWARD_MAGNITUDE * 5.0; // Correct: "Go" and it spiked
+                reward = REWARD_MAGNITUDE; // Correct: "Go" and it spiked
             } else {
                 reward = -REWARD_MAGNITUDE; // Correct: "Go" and it didn't spike
             }

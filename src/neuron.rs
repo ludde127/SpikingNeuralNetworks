@@ -5,7 +5,7 @@ use crate::synapse::ChemicalSynapse;
 
 #[derive(Clone, Debug)]
 pub struct SpikeTime {
-    time: f32,
+    pub time: f32,
     pub membrane_potential_at_spike: f32,
 }
 
@@ -24,7 +24,7 @@ pub struct Neuron {
     // Reward properties
     ema_activation: EmaMeanF32,
     ema_firing_rate: EmaMeanF32,
-    last_spike_times: Vec<SpikeTime>,
+    pub last_spike_times: Vec<SpikeTime>,
     pub ema_firing_rate_before_last_spike: f32,
 }
 

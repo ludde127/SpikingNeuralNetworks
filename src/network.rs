@@ -24,7 +24,8 @@ impl Network {
         let mut neurons = Vec::with_capacity(num_neurons);
         for i in 0..num_neurons {
             neurons.push(Arc::new(RwLock::new(Neuron::new(
-                get_clamped_normal(MIN_NEURON_THRESHOLD, MAX_NEURON_THRESHOLD, rng),
+                //get_clamped_normal(MIN_NEURON_THRESHOLD, MAX_NEURON_THRESHOLD, rng),
+                MIN_NEURON_THRESHOLD,
                 i,
             ))));
         }
@@ -58,6 +59,14 @@ impl Network {
         }
 
         Network { neurons, synapses }
+    }
+
+    pub fn random_weight_delta(&mut self, rng: &mut impl Rng, max_delta: f32) {
+        for synapse in &self.synapses {
+            let mut s = synapse.write().unwrap();
+            let delta_w = rng.gen_range(-max_delta..max_delta);
+            s.weight = (s.weight + delta_w).clamp(-1.0, 1.0);
+        }
     }
 
     pub fn reset_state(&mut self) {
