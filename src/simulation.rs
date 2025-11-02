@@ -1,8 +1,7 @@
 use crate::neuron::{Neuron, NeuronBehavior};
 use crate::reward_system::RewardSystem;
 use crate::spike_event::SpikeEvent;
-use crate::synapse::{ChemicalSynapse, Synapse};
-use graphviz_rust::print;
+use crate::synapse::{Synapse};
 use rand::Rng;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
@@ -30,12 +29,21 @@ impl Simulation {
 
     pub fn reward(&mut self, reward: f32) {
         self.reward_system.add_reward(self.time, reward);
-        if self.current_trial_spike_events.is_empty() {
-            return;
-        }
+        // Always call update_synapses to record delta error per learning step,
+        // even if there were no spike events (no weight updates will occur).
         self.reward_system
             .update_synapses(self.time, &self.current_trial_spike_events);
         self.current_trial_spike_events = Vec::new();
+    }
+
+    // New: expose the reward system's EMA average reward at current sim time
+    pub fn average_reward(&self) -> f32 {
+        self.reward_system.get_average_reward(self.time).unwrap_or(0.0)
+    }
+
+    // New: expose delta error history for plotting
+    pub fn delta_error_history(&self) -> &[f32] {
+        self.reward_system.delta_error_history()
     }
 
     fn send_action_potential(&mut self, neuron: Arc<RwLock<Neuron>>) {

@@ -1,6 +1,5 @@
 use crate::constants::{LEARNING_RATE, MAX_SYNAPSE_WEIGHT, MIN_SYNAPSE_WEIGHT, REWARD_AVERAGE_DURATION};
 use crate::neuron::NeuronBehavior;
-use crate::synapse::{Synapse};
 use std::sync::{Arc, RwLock};
 use crate::datastructures::exponential_rolling_mean::EmaMeanF32;
 use crate::spike_event::SpikeEvent;
@@ -9,6 +8,8 @@ pub struct RewardSystem {
     learning_rate: f32,
     average_reward: EmaMeanF32,
     last_reward: f32,
+    // Track the delta error (reward prediction error) per learning step
+    delta_error_history: Vec<f32>,
 }
 
 impl RewardSystem {
@@ -17,6 +18,7 @@ impl RewardSystem {
             learning_rate: LEARNING_RATE,
             average_reward: EmaMeanF32::new(REWARD_AVERAGE_DURATION), // This is global so we use a slower mean function than in synapses.
             last_reward: 0.0,
+            delta_error_history: Vec::new(),
         }
     }
 
@@ -33,8 +35,14 @@ impl RewardSystem {
 
         // We will iterate all the synapses so only send synapses which have been active lately.
         let average_reward = self.average_reward.get_mean(time).unwrap_or(0.0);
-        let delta_reward = self.last_reward - average_reward;
+        let weighted_average_reward = average_reward * (time / REWARD_AVERAGE_DURATION).min(1.0);
+        let delta_reward = self.last_reward - average_reward * weighted_average_reward;
+
+        // Record delta error for plotting regardless of whether we update.
+        self.delta_error_history.push(delta_reward);
+
         if delta_reward.abs() < 0.01 {return}
+
 
         let mut delta_sum = 0.0;
         for spike_event in spike_events {
@@ -64,5 +72,15 @@ impl RewardSystem {
         }
         println!("Total weight change this reward: {}, And average: {}, num spikes: {}", delta_sum, delta_sum/(spike_events.len() as f32), spike_events.len());
         self.last_reward = 0.0;
+    }
+
+    // New: expose the current EMA average reward (decayed to the provided time)
+    pub fn get_average_reward(&self, current_time: f32) -> Option<f32> {
+        self.average_reward.get_mean(current_time)
+    }
+
+    // New: expose the delta error history for plotting
+    pub fn delta_error_history(&self) -> &[f32] {
+        &self.delta_error_history
     }
 }
